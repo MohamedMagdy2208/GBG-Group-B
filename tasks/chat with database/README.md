@@ -32,7 +32,7 @@ Streamlit application for asking business questions over a Railway-hosted Postgr
 2. Install dependencies:
 
 ```bash
-cd "tasks/task 2"
+cd "tasks/chat with database"
 pip install -r requirements.txt
 ```
 
