@@ -2,8 +2,9 @@
 
 import pytest
 
-from src.database.client import DatabaseManager
 from src.config.settings import Settings
+from src.database.client import DatabaseManager
+from src.services.rag_pipeline import ChatWithDatabaseService
 from src.services.sql_validator import normalize_sql, validate_read_only_sql
 
 
@@ -35,3 +36,11 @@ def test_execute_query_limit_detection_handles_existing_limit() -> None:
     sql = 'SELECT 1 AS value\nLIMIT 5'
     rows = db.execute_query(sql, limit=50)
     assert rows == [{"value": 1}]
+
+
+def test_extract_clarification_request_ignores_none_sentence_when_sql_exists() -> None:
+    result = ChatWithDatabaseService._extract_clarification_request(
+        "None. The user request is clear and specifies the playlist ID and the number of tracks to display.",
+        sql='SELECT t."Name" FROM "Track" t LIMIT 5',
+    )
+    assert result is None

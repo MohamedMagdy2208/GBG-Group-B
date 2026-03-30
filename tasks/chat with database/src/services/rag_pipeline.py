@@ -74,7 +74,10 @@ class ChatWithDatabaseService:
             max_rows=self.settings.max_result_rows,
         )
         generation = self.llm.complete_json(sql_messages)
-        clarification_needed = self._extract_clarification_request(generation.get("clarification_needed"))
+        clarification_needed = self._extract_clarification_request(
+            generation.get("clarification_needed"),
+            sql=generation.get("sql"),
+        )
         if clarification_needed:
             return QueryResponse(answer=clarification_needed, sources=source_items)
 
@@ -96,14 +99,19 @@ class ChatWithDatabaseService:
         return QueryResponse(answer=answer, sql=sql, rows=rows, sources=source_items)
 
     @staticmethod
-    def _extract_clarification_request(value: object) -> str | None:
+    def _extract_clarification_request(value: object, sql: object = None) -> str | None:
         """Normalize common model outputs for clarification requests."""
 
         if value in (None, False):
             return None
+        if isinstance(sql, str) and sql.strip():
+            return None
         if isinstance(value, str):
             normalized = value.strip()
-            if normalized.lower() in {"", "false", "none", "null", "no"}:
+            lowered = normalized.lower()
+            if lowered in {"", "false", "none", "null", "no"}:
+                return None
+            if lowered.startswith(("none.", "none ", "no clarification", "not needed")):
                 return None
             return normalized
         return str(value)
