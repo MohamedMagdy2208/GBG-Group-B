@@ -1,0 +1,11 @@
+streamlit==1.44.1
+pandas==2.2.3
+sqlalchemy==2.0.40
+psycopg[binary]==3.2.6
+openai==1.72.0
+faiss-cpu==1.10.0
+numpy==2.2.4
+python-dotenv==1.1.0
+pydantic==2.11.2
+pytest==8.3.5
+
