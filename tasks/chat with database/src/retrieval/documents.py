@@ -50,6 +50,87 @@ EXAMPLE_QUERIES: list[tuple[str, str]] = [
             """
         ).strip(),
     ),
+    (
+        "Top artists by revenue",
+        dedent(
+            """
+            SELECT ar."Name" AS artist_name,
+                   ROUND(SUM(il."UnitPrice" * il."Quantity")::numeric, 2) AS revenue
+            FROM "InvoiceLine" il
+            JOIN "Track" t ON t."TrackId" = il."TrackId"
+            JOIN "Album" al ON al."AlbumId" = t."AlbumId"
+            JOIN "Artist" ar ON ar."ArtistId" = al."ArtistId"
+            GROUP BY ar."Name"
+            ORDER BY revenue DESC
+            LIMIT 10
+            """
+        ).strip(),
+    ),
+    (
+        "Tracks in a playlist",
+        dedent(
+            """
+            SELECT p."Name" AS playlist_name, t."Name" AS track_name
+            FROM "PlaylistTrack" pt
+            JOIN "Playlist" p ON p."PlaylistId" = pt."PlaylistId"
+            JOIN "Track" t ON t."TrackId" = pt."TrackId"
+            WHERE pt."PlaylistId" = 1
+            ORDER BY t."Name"
+            LIMIT 10
+            """
+        ).strip(),
+    ),
+    (
+        "Sales by year",
+        dedent(
+            """
+            SELECT EXTRACT(YEAR FROM i."InvoiceDate") AS sales_year,
+                   ROUND(SUM(i."Total")::numeric, 2) AS revenue
+            FROM "Invoice" i
+            GROUP BY sales_year
+            ORDER BY sales_year
+            """
+        ).strip(),
+    ),
+    (
+        "Revenue by support representative",
+        dedent(
+            """
+            SELECT e."EmployeeId", e."FirstName", e."LastName",
+                   ROUND(SUM(i."Total")::numeric, 2) AS revenue
+            FROM "Employee" e
+            JOIN "Customer" c ON c."SupportRepId" = e."EmployeeId"
+            JOIN "Invoice" i ON i."CustomerId" = c."CustomerId"
+            GROUP BY e."EmployeeId", e."FirstName", e."LastName"
+            ORDER BY revenue DESC
+            """
+        ).strip(),
+    ),
+    (
+        "Average track length by genre",
+        dedent(
+            """
+            SELECT g."Name" AS genre,
+                   ROUND(AVG(t."Milliseconds") / 1000.0, 2) AS avg_seconds
+            FROM "Track" t
+            JOIN "Genre" g ON g."GenreId" = t."GenreId"
+            GROUP BY g."Name"
+            ORDER BY avg_seconds DESC
+            LIMIT 10
+            """
+        ).strip(),
+    ),
+    (
+        "Customers by country",
+        dedent(
+            """
+            SELECT c."Country", COUNT(*) AS customer_count
+            FROM "Customer" c
+            GROUP BY c."Country"
+            ORDER BY customer_count DESC, c."Country"
+            """
+        ).strip(),
+    ),
 ]
 
 
