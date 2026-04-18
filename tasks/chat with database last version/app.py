@@ -11,6 +11,37 @@ with st.sidebar:
     st.header("Chinook SQL Chatbot")
     st.markdown("Ask natural language questions about the Chinook music database.")
 
+    # Advanced settings
+    st.subheader("Advanced Settings")
+    if "use_embedding_retrieval" not in st.session_state:
+        st.session_state.use_embedding_retrieval = USE_EMBEDDING_RETRIEVAL
+
+    retrieval_modes = {
+        "Static few-shot": False,
+        "Embedding retrieval": True,
+    }
+    default_mode = (
+        "Embedding retrieval"
+        if st.session_state.use_embedding_retrieval
+        else "Static few-shot"
+    )
+    retrieval_mode = st.radio(
+        "SQL example selection",
+        options=list(retrieval_modes.keys()),
+        index=list(retrieval_modes.keys()).index(default_mode),
+        help=(
+            "Static sends all examples. Embedding retrieval selects the most "
+            "similar examples before generating SQL."
+        ),
+    )
+    st.session_state.use_embedding_retrieval = retrieval_modes[retrieval_mode]
+    st.caption(
+        "Choose before asking. Embedding retrieval needs the Azure embedding "
+        "deployment configured in .env."
+    )
+
+    st.divider()
+
     # Schema viewer
     st.subheader("Database Schema")
     try:
@@ -41,37 +72,6 @@ with st.sidebar:
     for eq in example_questions:
         if st.button(eq, key=eq, use_container_width=True):
             st.session_state["prefill_question"] = eq
-
-    st.divider()
-
-    # Advanced settings
-    st.subheader("Advanced Settings")
-    if "use_embedding_retrieval" not in st.session_state:
-        st.session_state.use_embedding_retrieval = USE_EMBEDDING_RETRIEVAL
-
-    retrieval_modes = {
-        "Static few-shot": False,
-        "Embedding retrieval": True,
-    }
-    default_mode = (
-        "Embedding retrieval"
-        if st.session_state.use_embedding_retrieval
-        else "Static few-shot"
-    )
-    retrieval_mode = st.radio(
-        "SQL example selection",
-        options=list(retrieval_modes.keys()),
-        index=list(retrieval_modes.keys()).index(default_mode),
-        help=(
-            "Static sends all examples. Embedding retrieval selects the most "
-            "similar examples before generating SQL."
-        ),
-    )
-    st.session_state.use_embedding_retrieval = retrieval_modes[retrieval_mode]
-    st.caption(
-        "Choose before asking. Embedding retrieval needs the Azure embedding "
-        "deployment configured in .env."
-    )
 
     st.divider()
 
