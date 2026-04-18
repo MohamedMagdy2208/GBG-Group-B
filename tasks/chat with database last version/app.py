@@ -74,6 +74,7 @@ if question:
     if not is_valid:
         st.error(error_msg)
     else:
+        chat_history = list(st.session_state.messages)
         st.session_state.messages.append({"role": "user", "content": question})
         with st.chat_message("user"):
             st.markdown(question)
@@ -82,13 +83,13 @@ if question:
             try:
                 with st.status("Processing your question...", expanded=True) as status:
                     st.write("Generating SQL query...")
-                    sql_query = generate_sql(question)
+                    sql_query = generate_sql(question, chat_history=chat_history)
 
                     st.write("Executing query...")
                     result, sql_query = run_sql_with_retry(question, sql_query)
 
                     st.write("Generating answer...")
-                    answer = generate_response(question, result)
+                    answer = generate_response(question, result, chat_history=chat_history)
 
                     status.update(label="Done!", state="complete", expanded=False)
 

@@ -15,6 +15,8 @@ A production-ready Streamlit chatbot that converts **natural language questions*
 
 - **Natural Language to SQL** — Ask questions in plain English, get accurate PostgreSQL queries
 - **Few-Shot Prompting** — 34 curated examples covering simple SELECTs, JOINs, subqueries, HAVING, person lookups, unavailable-data handling, analytics patterns, Window Functions (RANK, PARTITION BY), and Recursive CTEs
+- **Optional Embedding Retrieval** — Selects the most relevant few-shot examples with Azure OpenAI embeddings when enabled
+- **Chat History Context** — Uses recent conversation turns to resolve follow-up questions without weakening SQL safety rules
 - **Read-Only Security** — All write operations (DROP, DELETE, INSERT, UPDATE, ALTER, CREATE, TRUNCATE) are blocked at multiple layers
 - **Input Validation** — Prompt injection protection, max character limits
 - **Schema Viewer** — Sidebar shows all tables and columns from the live database
@@ -64,7 +66,9 @@ chinook-chatbot/
 │   ├── __init__.py
 │   ├── config.py           # Environment variables & constants
 │   ├── database.py         # DB connection, schema caching, query execution
+│   ├── history.py          # Compact chat history formatting for follow-ups
 │   ├── prompts.py          # Few-shot prompt builder & response template
+│   ├── retrieval.py        # Optional embedding-based few-shot selection
 │   ├── chains.py           # LangChain chains (SQL generation + NL response)
 │   └── utils.py            # SQL cleaning, validation, input checks
 ├── data/
@@ -74,7 +78,7 @@ chinook-chatbot/
 │   ├── deploy_db.py        # Load CSVs → PostgreSQL
 │   └── deploy_azure.sh     # Full Azure deployment script
 ├── tests/
-│   ├── test_utils.py       # Unit tests (49 tests)
+│   ├── test_utils.py       # Unit tests (55 tests)
 │   ├── test_integration.py # Integration tests (9 tests)
 │   ├── test_benchmark.py   # LLM benchmark (12 queries)
 │   └── test_full_app.py    # Complete test suite (70 tests)
@@ -109,7 +113,7 @@ chinook-chatbot/
 
 | Test Suite | Tests | Result |
 |---|---|---|
-| **Unit Tests** — SQL validation, cleaning, input checks | 49 | 49/49 ✅ |
+| **Unit Tests** — SQL validation, cleaning, input checks | 55 | 55/55 ✅ |
 | **Integration Tests** — DB connection, schema, security | 9 | 9/9 ✅ |
 | **Benchmark Tests** — LLM accuracy across query types | 12 | 12/12 ✅ |
 | **Full App Tests** — End-to-end correctness + edge cases | 70 | 70/70 ✅ |
@@ -179,8 +183,14 @@ Open **http://localhost:8501** in your browser.
 | `AZURE_OPENAI_ENDPOINT` | ✅ | Azure OpenAI endpoint URL |
 | `AZURE_OPENAI_API_VERSION` | ✅ | API version (e.g., `2024-12-01-preview`) |
 | `AZURE_OPENAI_DEPLOYMENT` | ✅ | Model deployment name (e.g., `gpt-4o`) |
+| `USE_EMBEDDING_RETRIEVAL` | ❌ | Enable dynamic few-shot retrieval with embeddings (default: `false`) |
+| `AZURE_OPENAI_EMBEDDING_API_VERSION` | ❌ | Embeddings API version (default: `2024-02-01`) |
+| `AZURE_OPENAI_EMBEDDING_DEPLOYMENT` | ❌ | Embedding deployment name (e.g., `text-embedding-3-small`) |
+| `FEWSHOT_TOP_K` | ❌ | Number of examples retrieved when embeddings are enabled (default: `8`) |
 | `DATABASE_URL` | ✅ | PostgreSQL connection string. For local Docker: `postgresql://chinook:chinook@localhost:5432/chinook` |
 | `MAX_RESULT_ROWS` | ❌ | Max rows sent to the answer generator (default: `50`) |
+| `MAX_CHAT_HISTORY_MESSAGES` | ❌ | Recent chat messages included for follow-up context (default: `6`) |
+| `MAX_CHAT_HISTORY_CHARS` | ❌ | Max characters per history message before truncation (default: `1200`) |
 | `LANGSMITH_TRACING` | ❌ | Enable LangSmith tracing (default: `true`) |
 | `LANGSMITH_API_KEY` | ❌ | LangSmith API key |
 | `LANGSMITH_PROJECT` | ❌ | LangSmith project name |
@@ -230,7 +240,7 @@ See [scripts/deploy_azure.sh](scripts/deploy_azure.sh) for the full deployment s
 | **LLM** | Azure OpenAI GPT-4o |
 | **Orchestration** | LangChain |
 | **Database** | PostgreSQL (Railway) |
-| **Prompt Strategy** | Few-Shot Prompting (34 examples) |
+| **Prompt Strategy** | Few-Shot Prompting (34 examples), optional embedding retrieval |
 | **Containerization** | Docker |
 | **Cloud** | Microsoft Azure |
 | **Tracing** | LangSmith (optional) |

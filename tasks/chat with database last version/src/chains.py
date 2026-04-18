@@ -10,7 +10,9 @@ from src.config import (
     require_env_vars,
 )
 from src.database import get_cached_table_info, execute_query
+from src.history import format_chat_history
 from src.prompts import build_fewshot_prompt, RESPONSE_PROMPT
+from src.retrieval import select_relevant_fewshots
 from src.utils import clean_sql, ensure_sql_limit, validate_sql_readonly
 
 MAX_RETRIES = 2
@@ -80,20 +82,22 @@ def _get_unavailable_data_sql(question: str) -> str | None:
     return None
 
 
-def generate_sql(question: str) -> str:
+def generate_sql(question: str, chat_history=None) -> str:
     """Generate a SQL query from a natural language question."""
     fallback_sql = _get_unavailable_data_sql(question)
     if fallback_sql:
         return _prepare_generated_sql(fallback_sql)
 
     llm = get_llm()
-    prompt = build_fewshot_prompt()
+    examples = select_relevant_fewshots(question)
+    prompt = build_fewshot_prompt(examples)
     chain = prompt | llm | StrOutputParser()
     table_info = get_cached_table_info()
     raw = chain.invoke({
         "input": question,
         "table_info": table_info,
         "max_rows": MAX_RESULT_ROWS,
+        "chat_history": format_chat_history(chat_history),
     })
     return _prepare_generated_sql(raw)
 
@@ -141,7 +145,7 @@ def run_sql_with_retry(question: str, sql: str) -> tuple[str, str]:
     raise last_error
 
 
-def generate_response(question: str, data: str) -> str:
+def generate_response(question: str, data: str, chat_history=None) -> str:
     """Generate a natural language response from query results."""
     llm = get_llm()
     chain = RESPONSE_PROMPT | llm | StrOutputParser()
@@ -149,4 +153,5 @@ def generate_response(question: str, data: str) -> str:
         "question": question,
         "data": data,
         "max_rows": MAX_RESULT_ROWS,
+        "chat_history": format_chat_history(chat_history),
     })
