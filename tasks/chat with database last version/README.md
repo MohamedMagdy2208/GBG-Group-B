@@ -1,6 +1,6 @@
 # 🎵 Chinook SQL Chatbot — Chat with Databases
 
-A production-ready Streamlit chatbot that converts **natural language questions** into **PostgreSQL queries** using **LangChain + Azure OpenAI (GPT-4o)** with **31 hand-crafted few-shot examples** — including Recursive CTEs, Window Functions, specific-person lookups, unavailable-data handling, and multi-table JOINs. It executes queries against the Chinook music database and returns clear, natural language answers.
+A production-ready Streamlit chatbot that converts **natural language questions** into **PostgreSQL queries** using **LangChain + Azure OpenAI (GPT-4o)** with **34 hand-crafted few-shot examples** — including Recursive CTEs, Window Functions, specific-person lookups, unavailable-data handling, analytics patterns, and multi-table JOINs. It executes queries against the Chinook music database and returns clear, natural language answers.
 
 ![Python](https://img.shields.io/badge/Python-3.11-blue)
 ![Streamlit](https://img.shields.io/badge/Streamlit-1.41-red)
@@ -14,7 +14,7 @@ A production-ready Streamlit chatbot that converts **natural language questions*
 ## 📌 Features
 
 - **Natural Language to SQL** — Ask questions in plain English, get accurate PostgreSQL queries
-- **Few-Shot Prompting** — 31 curated examples covering simple SELECTs, JOINs, subqueries, HAVING, person lookups, unavailable-data handling, Window Functions (RANK, PARTITION BY), and Recursive CTEs
+- **Few-Shot Prompting** — 34 curated examples covering simple SELECTs, JOINs, subqueries, HAVING, person lookups, unavailable-data handling, analytics patterns, Window Functions (RANK, PARTITION BY), and Recursive CTEs
 - **Read-Only Security** — All write operations (DROP, DELETE, INSERT, UPDATE, ALTER, CREATE, TRUNCATE) are blocked at multiple layers
 - **Input Validation** — Prompt injection protection, max character limits
 - **Schema Viewer** — Sidebar shows all tables and columns from the live database
@@ -39,7 +39,7 @@ A production-ready Streamlit chatbot that converts **natural language questions*
                      ┌──────────▼───────────────────────┐
                      │  LangChain Pipeline               │
                      │                                   │
-                     │  1. Few-Shot Prompt (31 examples)  │
+                     │  1. Few-Shot Prompt (34 examples)  │
                      │  2. Azure OpenAI GPT-4o            │
                      │  3. SQL Validation (read-only)     │
                      │  4. Query Execution (PostgreSQL)   │
@@ -68,13 +68,13 @@ chinook-chatbot/
 │   ├── chains.py           # LangChain chains (SQL generation + NL response)
 │   └── utils.py            # SQL cleaning, validation, input checks
 ├── data/
-│   ├── fewshots.json       # 31 few-shot SQL examples
+│   ├── fewshots.json       # 34 few-shot SQL examples
 │   └── csv/                # 11 Chinook CSV data files
 ├── scripts/
 │   ├── deploy_db.py        # Load CSVs → PostgreSQL
 │   └── deploy_azure.sh     # Full Azure deployment script
 ├── tests/
-│   ├── test_utils.py       # Unit tests (46 tests)
+│   ├── test_utils.py       # Unit tests (49 tests)
 │   ├── test_integration.py # Integration tests (9 tests)
 │   ├── test_benchmark.py   # LLM benchmark (12 queries)
 │   └── test_full_app.py    # Complete test suite (70 tests)
@@ -109,7 +109,7 @@ chinook-chatbot/
 
 | Test Suite | Tests | Result |
 |---|---|---|
-| **Unit Tests** — SQL validation, cleaning, input checks | 46 | 46/46 ✅ |
+| **Unit Tests** — SQL validation, cleaning, input checks | 49 | 49/49 ✅ |
 | **Integration Tests** — DB connection, schema, security | 9 | 9/9 ✅ |
 | **Benchmark Tests** — LLM accuracy across query types | 12 | 12/12 ✅ |
 | **Full App Tests** — End-to-end correctness + edge cases | 70 | 70/70 ✅ |
@@ -230,7 +230,7 @@ See [scripts/deploy_azure.sh](scripts/deploy_azure.sh) for the full deployment s
 | **LLM** | Azure OpenAI GPT-4o |
 | **Orchestration** | LangChain |
 | **Database** | PostgreSQL (Railway) |
-| **Prompt Strategy** | Few-Shot Prompting (31 examples) |
+| **Prompt Strategy** | Few-Shot Prompting (34 examples) |
 | **Containerization** | Docker |
 | **Cloud** | Microsoft Azure |
 | **Tracing** | LangSmith (optional) |

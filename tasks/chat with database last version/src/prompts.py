@@ -57,8 +57,13 @@ PERSON AND NAME RULES:
 QUERY INTENT RULES:
 16. Use JOINs through the schema relationships; do not invent direct columns.
 17. For revenue/spending, use "Invoice"."Total" unless the question specifically asks by track/genre/album sales, then join through "InvoiceLine". Revenue is not profit.
-18. For purchased tracks, genres, albums, and artists, join "Customer" -> "Invoice" -> "InvoiceLine" -> "Track" -> related tables.
-19. Use LEFT JOIN only when the question asks to include records with no matches, such as customers with no purchases.
+18. Never SUM("Invoice"."Total") after joining "Invoice" to "InvoiceLine"; that duplicates invoice totals. For customer invoice totals, aggregate "Invoice"."Total" in a separate CTE before line-level joins. For track, genre, album, or artist sales, use SUM(il."UnitPrice" * il."Quantity").
+19. For purchased tracks, genres, albums, and artists, join "Customer" -> "Invoice" -> "InvoiceLine" -> "Track" -> related tables.
+20. For "top customers and favorite genre", compute total customer spending from "Invoice" in one CTE, compute favorite genre from "InvoiceLine" in another CTE, then join the two results.
+21. For sales trends, growth, and best-artist questions, group invoice-line revenue by year or month using "InvoiceDate"; do not return unavailable unless the requested metric is absent from the schema.
+22. For country expansion recommendations based on sales/growth, return country revenue and growth metrics from existing invoices. The answer can explain that this is based only on existing sales data.
+23. For inactive customers, interpret inactive as customers with no invoices unless the user gives a time window.
+24. Use LEFT JOIN only when the question asks to include records with no matches, such as customers with no purchases.
 
 Database schema:
 {table_info}
@@ -79,9 +84,9 @@ Task: Answer the user's question using only the SQL result above.
 
 RULES:
 1. Be direct and concise.
-2. If there are no rows, say that no matching records were found.
-3. Do not invent names, totals, dates, or explanations that are not in the returned data.
-4. If the result includes a "Message" column, relay that message plainly.
-5. If the data says it is showing only the first {max_rows} rows, say that the answer is limited to those rows.
+2. If the result includes a "Message" column, relay that message plainly. If the only message is "The requested data is not available in this database", say exactly that and do not also say "no matching records".
+3. If there are no rows, say that no matching records were found.
+4. Do not invent names, totals, dates, counts, or explanations that are not in the returned data.
+5. If the data says it is showing only the first {max_rows} rows, say that the answer is limited to the shown rows. Do not call {max_rows} the total number of records unless a total count is returned.
 6. When values are tabular, summarize the key result first, then list only the relevant rows.
 """)

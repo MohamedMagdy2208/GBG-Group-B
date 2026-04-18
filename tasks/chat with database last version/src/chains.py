@@ -31,6 +31,7 @@ UNAVAILABLE_DATA_PATTERNS = [
         r"\bcoupons?\b",
         r"\bsubscriptions?\b",
         r"\bsubscribed\b",
+        r"\bpodcasts?\b",
     ]
 ]
 
@@ -42,7 +43,7 @@ Error: {error}
 
 RULES:
 - Wrap ALL identifiers and aliases in double quotes (PostgreSQL is case-sensitive for quoted identifiers).
-- Use ROUND((expression)::numeric, 2) — never ROUND(float, N).
+- Use ROUND((expression)::numeric, 2) - never ROUND(float, N).
 - When referencing a subquery/CTE alias column, always use double quotes: sub."ColumnName".
 - Return ONLY the corrected SQL query, no explanation.
 

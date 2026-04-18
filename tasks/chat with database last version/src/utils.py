@@ -21,6 +21,20 @@ SQL_INJECTION_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+NATURAL_LANGUAGE_WRITE_PATTERN = re.compile(
+    r"\b(delete|remove|erase|wipe|destroy|truncate|drop)\b[\w\s]{0,80}\b(all|every|records?|rows?|tables?|database|invoices?|customers?)\b|"
+    r"\b(update|insert|modify|overwrite)\b[\w\s]{0,80}\b(records?|rows?|tables?|database)\b",
+    re.IGNORECASE,
+)
+
+PROMPT_INJECTION_PATTERN = re.compile(
+    r"\b(ignore|disregard|forget)\b[\w\s]{0,80}\b(previous|prior|above|instructions?|rules?)\b|"
+    r"\b(system|developer)\s+(prompt|message|instructions?)\b|"
+    r"\breturn\s+raw\s+sql\b|"
+    r"\bshow\s+(me\s+)?(your\s+)?(prompt|instructions?|system\s+message)\b",
+    re.IGNORECASE,
+)
+
 
 def _strip_sql_literals_and_comments(sql: str) -> str:
     """Return SQL with strings, quoted identifiers, and comments blanked out."""
@@ -259,6 +273,8 @@ def validate_question(question: str, max_length: int = 500) -> tuple[bool, str]:
         return False, "Please enter a question."
     if len(question) > max_length:
         return False, f"Question is too long ({len(question)} chars). Maximum is {max_length} characters."
-    if SQL_INJECTION_PATTERN.search(question):
-        return False, "Your question contains SQL-like syntax that is not allowed. Please rephrase using natural language."
+    if PROMPT_INJECTION_PATTERN.search(question):
+        return False, "Your question contains instruction-changing text that is not allowed. Please ask a database question."
+    if SQL_INJECTION_PATTERN.search(question) or NATURAL_LANGUAGE_WRITE_PATTERN.search(question):
+        return False, "Your question asks for an unsafe database operation. This chatbot can only answer read-only questions."
     return True, ""
