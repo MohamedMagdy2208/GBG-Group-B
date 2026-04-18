@@ -1,5 +1,5 @@
 import streamlit as st
-from src.config import MAX_QUESTION_LENGTH
+from src.config import MAX_QUESTION_LENGTH, USE_EMBEDDING_RETRIEVAL
 from src.database import get_table_names, get_table_columns
 from src.chains import generate_sql, run_sql_with_retry, generate_response
 from src.utils import validate_question
@@ -44,6 +44,37 @@ with st.sidebar:
 
     st.divider()
 
+    # Advanced settings
+    st.subheader("Advanced Settings")
+    if "use_embedding_retrieval" not in st.session_state:
+        st.session_state.use_embedding_retrieval = USE_EMBEDDING_RETRIEVAL
+
+    retrieval_modes = {
+        "Static few-shot": False,
+        "Embedding retrieval": True,
+    }
+    default_mode = (
+        "Embedding retrieval"
+        if st.session_state.use_embedding_retrieval
+        else "Static few-shot"
+    )
+    retrieval_mode = st.radio(
+        "SQL example selection",
+        options=list(retrieval_modes.keys()),
+        index=list(retrieval_modes.keys()).index(default_mode),
+        help=(
+            "Static sends all examples. Embedding retrieval selects the most "
+            "similar examples before generating SQL."
+        ),
+    )
+    st.session_state.use_embedding_retrieval = retrieval_modes[retrieval_mode]
+    st.caption(
+        "Choose before asking. Embedding retrieval needs the Azure embedding "
+        "deployment configured in .env."
+    )
+
+    st.divider()
+
     # Clear chat
     if st.button("Clear Chat", use_container_width=True):
         st.session_state.messages = []
@@ -83,7 +114,11 @@ if question:
             try:
                 with st.status("Processing your question...", expanded=True) as status:
                     st.write("Generating SQL query...")
-                    sql_query = generate_sql(question, chat_history=chat_history)
+                    sql_query = generate_sql(
+                        question,
+                        chat_history=chat_history,
+                        use_embedding_retrieval=st.session_state.use_embedding_retrieval,
+                    )
 
                     st.write("Executing query...")
                     result, sql_query = run_sql_with_retry(question, sql_query)

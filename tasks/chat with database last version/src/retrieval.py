@@ -63,9 +63,17 @@ def _build_fewshot_index(examples_digest: str):
     return list(zip(examples, vectors))
 
 
-def select_relevant_fewshots(question: str) -> list[dict[str, str]]:
+def select_relevant_fewshots(
+    question: str,
+    use_embedding_retrieval: bool | None = None,
+) -> list[dict[str, str]]:
     examples = load_fewshots()
-    if not USE_EMBEDDING_RETRIEVAL:
+    enabled = (
+        USE_EMBEDDING_RETRIEVAL
+        if use_embedding_retrieval is None
+        else use_embedding_retrieval
+    )
+    if not enabled:
         return examples
 
     top_k = max(1, min(FEWSHOT_TOP_K, len(examples)))

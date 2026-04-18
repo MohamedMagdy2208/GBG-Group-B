@@ -82,14 +82,21 @@ def _get_unavailable_data_sql(question: str) -> str | None:
     return None
 
 
-def generate_sql(question: str, chat_history=None) -> str:
+def generate_sql(
+    question: str,
+    chat_history=None,
+    use_embedding_retrieval: bool | None = None,
+) -> str:
     """Generate a SQL query from a natural language question."""
     fallback_sql = _get_unavailable_data_sql(question)
     if fallback_sql:
         return _prepare_generated_sql(fallback_sql)
 
     llm = get_llm()
-    examples = select_relevant_fewshots(question)
+    examples = select_relevant_fewshots(
+        question,
+        use_embedding_retrieval=use_embedding_retrieval,
+    )
     prompt = build_fewshot_prompt(examples)
     chain = prompt | llm | StrOutputParser()
     table_info = get_cached_table_info()

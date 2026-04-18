@@ -4,8 +4,9 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from src.utils import validate_sql_readonly, clean_sql, ensure_sql_limit, validate_question
-from src.retrieval import _cosine_similarity
+from src.retrieval import _cosine_similarity, select_relevant_fewshots
 from src.history import format_chat_history
+from src.prompts import load_fewshots
 
 
 def run_tests():
@@ -142,6 +143,7 @@ def run_tests():
     test("Cosine similarity identical vectors", abs(_cosine_similarity([1, 2, 3], [1, 2, 3]) - 1.0) < 1e-9)
     test("Cosine similarity orthogonal vectors", abs(_cosine_similarity([1, 0], [0, 1])) < 1e-9)
     test("Cosine similarity zero vector safe", _cosine_similarity([0, 0], [1, 1]) == 0.0)
+    test("Static retrieval override returns all examples", len(select_relevant_fewshots("top customers", use_embedding_retrieval=False)) == len(load_fewshots()))
 
     for r in results:
         print(r)
