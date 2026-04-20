@@ -1,4 +1,4 @@
-# Azure AI Document Intelligence Studio
+# Azure AI Document Intelligence Studio - Latest Version
 
 A Streamlit implementation of an Azure Document Intelligence Studio-style workflow.
 
