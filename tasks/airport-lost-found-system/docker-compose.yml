@@ -1,0 +1,81 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: airport_lost_found
+      POSTGRES_USER: airport
+      POSTGRES_PASSWORD: airport
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airport -d airport_lost_found"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgresql+psycopg://airport:airport@postgres:5432/airport_lost_found
+      REDIS_URL: redis://redis:6379/0
+      USE_AZURE_SERVICES: ${USE_AZURE_SERVICES:-false}
+      CORS_ORIGINS: '["http://localhost:5173"]'
+    command: sh -c "alembic upgrade head && python -m app.scripts.seed && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend/local_uploads:/app/local_uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: ./backend
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgresql+psycopg://airport:airport@postgres:5432/airport_lost_found
+      REDIS_URL: redis://redis:6379/0
+      USE_AZURE_SERVICES: ${USE_AZURE_SERVICES:-false}
+    command: sh -c "alembic upgrade head && python -m app.scripts.worker"
+    volumes:
+      - ./backend/local_uploads:/app/local_uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      target: dev
+    environment:
+      VITE_API_URL: http://localhost:8000
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
