@@ -1,0 +1,6 @@
+.env
+data/lost_found.db
+uploads/*
+!uploads/.gitkeep
+__pycache__/
+*.pyc
