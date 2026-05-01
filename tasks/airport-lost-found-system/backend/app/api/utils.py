@@ -1,5 +1,6 @@
 import logging
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -34,40 +35,74 @@ async def invalidate_operational_caches() -> None:
 
 async def enrich_lost_report(db: Session, report: LostReport) -> LostReport:
     text = " ".join(filter(None, [report.item_title, report.category, report.raw_description, report.lost_location, report.flight_number]))
-    attrs = await azure_openai_service.extract_structured_attributes(text)
-    report.ai_clean_description = await azure_openai_service.clean_item_description(report.raw_description)
+    try:
+        attrs = await azure_openai_service.extract_structured_attributes(text)
+    except Exception:
+        logger.exception("AI attribute extraction failed; using local fallback", extra={"event": "ai_extract_fallback"})
+        attrs = azure_openai_service.fallback_extract_structured_attributes(text)
+    try:
+        report.ai_clean_description = await azure_openai_service.clean_item_description(report.raw_description)
+    except Exception:
+        logger.exception("AI description cleaning failed; using raw description", extra={"event": "ai_clean_fallback"})
+        report.ai_clean_description = " ".join((report.raw_description or "").split())
     report.ai_extracted_attributes_json = attrs
     report.category = report.category or attrs.get("item_type")
     report.brand = report.brand or attrs.get("brand")
     report.model = report.model or attrs.get("model")
     report.color = report.color or attrs.get("color")
     report.flight_number = report.flight_number or attrs.get("flight_number")
-    report.embedding_vector_id, _ = await azure_openai_service.generate_embedding(text)
+    try:
+        report.embedding_vector_id, _ = await azure_openai_service.generate_embedding(text)
+    except Exception:
+        logger.exception("AI embedding failed; using local fallback vector id", extra={"event": "ai_embedding_fallback"})
+        report.embedding_vector_id, _ = azure_openai_service.fallback_embedding(text)
     db.flush()
-    report.search_document_id = await azure_search_service.index_lost_report(report)
+    try:
+        report.search_document_id = await azure_search_service.index_lost_report(report)
+    except Exception:
+        logger.exception("Azure Search indexing failed for lost report", extra={"event": "search_index_fallback"})
     db.add(report)
     return report
 
 
 async def enrich_found_item(db: Session, item: FoundItem) -> FoundItem:
+    item.vision_tags_json = item.vision_tags_json or []
     if item.image_blob_url:
-        vision = await azure_vision_service.analyze_uploaded_item_image(item.image_blob_url)
-        item.vision_tags_json = vision.get("tags", [])
-        item.vision_ocr_text = vision.get("ocr_text")
+        try:
+            vision = await azure_vision_service.analyze_uploaded_item_image(item.image_blob_url)
+            item.vision_tags_json = vision.get("tags", [])
+            item.vision_ocr_text = vision.get("ocr_text")
+        except Exception:
+            logger.exception("Azure Vision analysis failed; continuing without image analysis", extra={"event": "vision_fallback"})
     tags = " ".join(tag.get("name", "") for tag in item.vision_tags_json if isinstance(tag, dict))
     text = " ".join(
         filter(None, [item.item_title, item.category, item.raw_description, item.vision_ocr_text, tags, item.found_location])
     )
-    attrs = await azure_openai_service.extract_structured_attributes(text)
-    item.ai_clean_description = await azure_openai_service.clean_item_description(item.raw_description)
+    try:
+        attrs = await azure_openai_service.extract_structured_attributes(text)
+    except Exception:
+        logger.exception("AI attribute extraction failed; using local fallback", extra={"event": "ai_extract_fallback"})
+        attrs = azure_openai_service.fallback_extract_structured_attributes(text)
+    try:
+        item.ai_clean_description = await azure_openai_service.clean_item_description(item.raw_description)
+    except Exception:
+        logger.exception("AI description cleaning failed; using raw description", extra={"event": "ai_clean_fallback"})
+        item.ai_clean_description = " ".join((item.raw_description or "").split())
     item.ai_extracted_attributes_json = attrs
     item.category = item.category or attrs.get("item_type")
     item.brand = item.brand or attrs.get("brand")
     item.model = item.model or attrs.get("model")
     item.color = item.color or attrs.get("color")
-    item.embedding_vector_id, _ = await azure_openai_service.generate_embedding(text)
+    try:
+        item.embedding_vector_id, _ = await azure_openai_service.generate_embedding(text)
+    except Exception:
+        logger.exception("AI embedding failed; using local fallback vector id", extra={"event": "ai_embedding_fallback"})
+        item.embedding_vector_id, _ = azure_openai_service.fallback_embedding(text)
     db.flush()
-    item.search_document_id = await azure_search_service.index_found_item(item)
+    try:
+        item.search_document_id = await azure_search_service.index_found_item(item)
+    except Exception:
+        logger.exception("Azure Search indexing failed for found item", extra={"event": "search_index_fallback"})
     db.add(item)
     return item
 
@@ -82,17 +117,21 @@ async def upsert_match_candidate(
     confidence = breakdown["confidence_level"]
     if confidence is None:
         return None
-    summary = await azure_openai_service.summarize_match_evidence(
-        lost.raw_description,
-        found.raw_description,
-        breakdown,
-    )
-    candidate = (
-        db.query(MatchCandidate)
-        .filter(MatchCandidate.lost_report_id == lost.id, MatchCandidate.found_item_id == found.id)
-        .one_or_none()
-    )
-    if not candidate:
+    try:
+        summary = await azure_openai_service.summarize_match_evidence(
+            lost.raw_description,
+            found.raw_description,
+            breakdown,
+        )
+    except Exception:
+        logger.exception("AI match summary failed; using deterministic summary", extra={"event": "ai_summary_fallback"})
+        summary = (
+            f"Candidate scored {breakdown['match_score']:.1f}/100 from category, text, color, "
+            "location, time, flight, and identifier signals. Staff manual approval is required."
+        )
+    candidate = _get_match_candidate(db, lost.id, found.id)
+    is_new_candidate = candidate is None
+    if is_new_candidate:
         candidate = MatchCandidate(lost_report_id=lost.id, found_item_id=found.id)
     candidate.match_score = breakdown["match_score"]
     candidate.azure_search_score = breakdown["azure_search_score"]
@@ -105,8 +144,25 @@ async def upsert_match_candidate(
     candidate.unique_identifier_score = breakdown["unique_identifier_score"]
     candidate.confidence_level = confidence
     candidate.ai_match_summary = summary
-    db.add(candidate)
-    db.flush()
+    if is_new_candidate:
+        try:
+            with db.begin_nested():
+                db.add(candidate)
+                db.flush()
+        except IntegrityError:
+            logger.info(
+                "match candidate already existed during upsert",
+                extra={"event": "match_candidate_upsert_race", "lost_report_id": lost.id, "found_item_id": found.id},
+            )
+            candidate = _get_match_candidate(db, lost.id, found.id)
+            if candidate is None:
+                raise
+            _apply_match_breakdown(candidate, breakdown, confidence, summary)
+            db.add(candidate)
+            db.flush()
+    else:
+        db.add(candidate)
+        db.flush()
     enqueue_outbox(
         db,
         "match_candidate.upserted",
@@ -127,8 +183,40 @@ async def upsert_match_candidate(
     return candidate
 
 
+def _get_match_candidate(db: Session, lost_report_id: int, found_item_id: int) -> MatchCandidate | None:
+    with db.no_autoflush:
+        return (
+            db.query(MatchCandidate)
+            .filter(MatchCandidate.lost_report_id == lost_report_id, MatchCandidate.found_item_id == found_item_id)
+            .one_or_none()
+        )
+
+
+def _apply_match_breakdown(
+    candidate: MatchCandidate,
+    breakdown: dict,
+    confidence: ConfidenceLevel,
+    summary: str,
+) -> None:
+    candidate.match_score = breakdown["match_score"]
+    candidate.azure_search_score = breakdown["azure_search_score"]
+    candidate.category_score = breakdown["category_score"]
+    candidate.text_score = breakdown["text_score"]
+    candidate.color_score = breakdown["color_score"]
+    candidate.location_score = breakdown["location_score"]
+    candidate.time_score = breakdown["time_score"]
+    candidate.flight_score = breakdown["flight_score"]
+    candidate.unique_identifier_score = breakdown["unique_identifier_score"]
+    candidate.confidence_level = confidence
+    candidate.ai_match_summary = summary
+
+
 async def run_matching_for_lost_report(db: Session, report: LostReport) -> list[MatchCandidate]:
-    search_results = await azure_search_service.hybrid_search_found_items(db, report)
+    try:
+        search_results = await azure_search_service.hybrid_search_found_items(db, report)
+    except Exception:
+        logger.exception("Azure Search failed while matching lost report", extra={"event": "search_match_fallback"})
+        search_results = []
     candidates = []
     for item, search_score in search_results:
         candidate = await upsert_match_candidate(db, report, item, search_score)
@@ -142,7 +230,11 @@ async def run_matching_for_lost_report(db: Session, report: LostReport) -> list[
 
 
 async def run_matching_for_found_item(db: Session, item: FoundItem) -> list[MatchCandidate]:
-    search_results = await azure_search_service.hybrid_search_lost_reports(db, item)
+    try:
+        search_results = await azure_search_service.hybrid_search_lost_reports(db, item)
+    except Exception:
+        logger.exception("Azure Search failed while matching found item", extra={"event": "search_match_fallback"})
+        search_results = []
     candidates = []
     for report, search_score in search_results:
         candidate = await upsert_match_candidate(db, report, item, search_score)

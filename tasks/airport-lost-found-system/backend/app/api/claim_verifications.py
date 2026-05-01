@@ -48,8 +48,9 @@ async def create_claim_verification(
     current_user: User = Depends(require_staff),
 ) -> ClaimVerification:
     idempotency_key = get_idempotency_key(request)
-    hash_value = request_hash({"match_id": match_id, "payload": payload.model_dump(mode="json"), "staff_id": current_user.id})
-    cached = find_idempotent_response(db, "match.release", idempotency_key, hash_value)
+    payload_data = payload.model_dump(mode="json") if payload else {}
+    hash_value = request_hash({"match_id": match_id, "payload": payload_data, "staff_id": current_user.id})
+    cached = find_idempotent_response(db, "claim_verification.create", idempotency_key, hash_value)
     if cached and cached.get("claim_verification_id"):
         claim = db.get(ClaimVerification, cached["claim_verification_id"])
         if claim:
@@ -238,6 +239,14 @@ async def release_match(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_staff),
 ) -> ClaimVerification:
+    idempotency_key = get_idempotency_key(request)
+    hash_value = request_hash({"match_id": match_id, "payload": payload.model_dump(mode="json"), "staff_id": current_user.id})
+    cached = find_idempotent_response(db, "match.release", idempotency_key, hash_value)
+    if cached and cached.get("claim_verification_id"):
+        claim = db.get(ClaimVerification, cached["claim_verification_id"])
+        if claim:
+            return claim
+
     candidate = _get_candidate(db, match_id)
     claim = (
         db.query(ClaimVerification)

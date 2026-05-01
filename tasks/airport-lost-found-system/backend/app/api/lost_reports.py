@@ -42,10 +42,10 @@ async def create_lost_report(
     await enrich_lost_report(db, report)
     enqueue_outbox(db, "lost_report.created", "lost_report", report.id, {"report_code": report.report_code, "category": report.category})
     enqueue_job(db, "graph.summary.generate", {"entity_type": "lost_report", "entity_id": report.id})
+    enqueue_job(db, "matching.lost_report", {"lost_report_id": report.id})
     store_idempotent_response(db, "lost_report.create", idempotency_key, hash_value, {"lost_report_id": report.id}, status.HTTP_201_CREATED)
     db.commit()
     db.refresh(report)
-    await run_matching_for_lost_report(db, report)
     await invalidate_operational_caches()
     return report
 

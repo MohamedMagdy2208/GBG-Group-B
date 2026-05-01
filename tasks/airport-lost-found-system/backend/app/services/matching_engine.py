@@ -109,7 +109,18 @@ class MatchingEngine:
         raw = (attrs or {}).get("unique_identifiers") or []
         if isinstance(raw, str):
             raw = [raw]
-        return {str(value).strip().lower() for value in raw if value}
+        values = set()
+        for value in raw:
+            normalized = self._normalize_identifier(value)
+            if normalized:
+                values.add(normalized)
+        return values
+
+    def _normalize_identifier(self, value: Any) -> str | None:
+        text = str(value or "").strip().lower()
+        if not text or "[redacted]" in text:
+            return None
+        return "".join(character for character in text if character.isalnum())
 
     def _lost_text(self, lost: LostReport) -> str:
         return " ".join(filter(None, [lost.item_title, lost.raw_description, lost.ai_clean_description, lost.brand, lost.model]))

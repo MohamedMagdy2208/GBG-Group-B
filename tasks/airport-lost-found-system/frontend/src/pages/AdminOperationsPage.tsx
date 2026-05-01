@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Activity, Database, RefreshCw, ServerCog, ShieldCheck } from "lucide-react";
 import type React from "react";
+import { useState } from "react";
 import { api } from "../api/client";
 import { Badge } from "../components/Badge";
 import { PageHeader } from "../components/PageHeader";
@@ -9,6 +10,7 @@ import type { BackgroundJob, DeepHealth, OutboxEvent, ProviderStatus } from "../
 
 export function AdminOperationsPage() {
   const queryClient = useQueryClient();
+  const [lastAdminAction, setLastAdminAction] = useState<Record<string, unknown> | null>(null);
   const { data: jobs = [] } = useQuery({
     queryKey: ["admin-jobs"],
     queryFn: async () => (await api.get<BackgroundJob[]>("/admin/jobs")).data,
@@ -30,6 +32,17 @@ export function AdminOperationsPage() {
   const retryJob = useMutation({
     mutationFn: async (jobId: number) => (await api.post(`/admin/jobs/${jobId}/retry`)).data,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin-jobs"] }),
+  });
+  const adminAction = useMutation({
+    mutationFn: async ({ endpoint }: { endpoint: string }) => (await api.post<Record<string, unknown>>(endpoint)).data,
+    onSuccess: (data) => {
+      setLastAdminAction(data);
+      queryClient.invalidateQueries({ queryKey: ["deep-health"] });
+      queryClient.invalidateQueries({ queryKey: ["provider-status"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-jobs"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-outbox"] });
+      queryClient.invalidateQueries({ queryKey: ["matches"] });
+    },
   });
 
   const pendingJobs = jobs.filter((job) => job.status === "pending" || job.status === "failed").length;
@@ -75,11 +88,34 @@ export function AdminOperationsPage() {
             <ProviderLine label="Azure Mode" value={providers?.use_azure_services ? "enabled" : "local"} />
             <ProviderLine label="Cache" value={providers?.cache_backend ?? "-"} />
             <ProviderLine label="Graph RAG" value={providers?.graph_rag_provider ?? "-"} />
-            {Object.entries(providers?.azure ?? {}).map(([key, value]) => (
+            {Object.entries(providers?.azure ?? {})
+              .filter(([key]) => key !== "openai_routes")
+              .map(([key, value]) => (
               <ProviderLine key={key} label={key.replaceAll("_", " ")} value={value ? "configured" : "missing"} tone={value ? "normal" : "warning"} />
+            ))}
+            {Object.entries(providers?.azure.openai_routes ?? {}).map(([key, value]) => (
+              <ProviderLine key={`openai-${key}`} label={`OpenAI ${key}`} value={value ?? "missing"} tone={value ? "normal" : "warning"} />
             ))}
           </div>
         </div>
+      </div>
+
+      <div className="rounded-lg border border-slate-200 bg-white shadow-sm">
+        <div className="border-b border-slate-100 px-4 py-3">
+          <h2 className="text-sm font-semibold text-slate-950">Search And Matching Tools</h2>
+        </div>
+        <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-5">
+          <AdminActionButton label="Recreate Index" endpoint="/admin/search/recreate-index" mutation={adminAction} />
+          <AdminActionButton label="Reindex Lost" endpoint="/admin/search/reindex-lost-reports" mutation={adminAction} />
+          <AdminActionButton label="Reindex Found" endpoint="/admin/search/reindex-found-items" mutation={adminAction} />
+          <AdminActionButton label="Rebuild All" endpoint="/admin/search/reindex-all?recreate_index=true" mutation={adminAction} />
+          <AdminActionButton label="Rerun Matching" endpoint="/admin/matching/rerun-all" mutation={adminAction} />
+        </div>
+        {lastAdminAction ? (
+          <div className="border-t border-slate-100 px-4 py-3 text-xs text-slate-600">
+            <span className="font-semibold text-slate-950">Last result:</span> {compactAction(lastAdminAction)}
+          </div>
+        ) : null}
       </div>
 
       <div className="grid gap-4 xl:grid-cols-2">
@@ -103,6 +139,27 @@ export function AdminOperationsPage() {
         <OperationsTable title="Outbox Events" rows={outbox} columns={["event_type", "status", "attempts", "updated_at"]} />
       </div>
     </section>
+  );
+}
+
+function AdminActionButton({
+  label,
+  endpoint,
+  mutation,
+}: {
+  label: string;
+  endpoint: string;
+  mutation: { isPending: boolean; mutate: (payload: { endpoint: string }) => void };
+}) {
+  return (
+    <button
+      className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+      disabled={mutation.isPending}
+      onClick={() => mutation.mutate({ endpoint })}
+    >
+      <RefreshCw className={`h-4 w-4 ${mutation.isPending ? "animate-spin" : ""}`} />
+      {label}
+    </button>
   );
 }
 
@@ -171,4 +228,8 @@ function compactJson(value: Record<string, unknown>) {
     .map(([key, val]) => `${key}: ${String(val)}`)
     .slice(0, 4)
     .join(" | ");
+}
+
+function compactAction(value: Record<string, unknown>) {
+  return JSON.stringify(value, (_key, val) => (Array.isArray(val) && val.length > 3 ? [...val.slice(0, 3), "..."] : val));
 }

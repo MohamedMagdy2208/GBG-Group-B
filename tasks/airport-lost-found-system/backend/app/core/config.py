@@ -17,6 +17,17 @@ SECRET_FIELD_NAMES = {
     "AZURE_OPENAI_API_KEY": "azure_openai_api_key",
     "AZURE_OPENAI_API_VERSION": "azure_openai_api_version",
     "AZURE_OPENAI_CHAT_DEPLOYMENT": "azure_openai_chat_deployment",
+    "AZURE_OPENAI_FAST_DEPLOYMENT": "azure_openai_fast_deployment",
+    "AZURE_OPENAI_FAST_ENDPOINT": "azure_openai_fast_endpoint",
+    "AZURE_OPENAI_FAST_API_KEY": "azure_openai_fast_api_key",
+    "AZURE_OPENAI_REASONING_DEPLOYMENT": "azure_openai_reasoning_deployment",
+    "AZURE_OPENAI_REASONING_ENDPOINT": "azure_openai_reasoning_endpoint",
+    "AZURE_OPENAI_REASONING_API_KEY": "azure_openai_reasoning_api_key",
+    "AZURE_OPENAI_DEEP_REASONING_DEPLOYMENT": "azure_openai_deep_reasoning_deployment",
+    "AZURE_OPENAI_DEEP_REASONING_ENDPOINT": "azure_openai_deep_reasoning_endpoint",
+    "AZURE_OPENAI_DEEP_REASONING_API_KEY": "azure_openai_deep_reasoning_api_key",
+    "AZURE_OPENAI_EMBEDDING_ENDPOINT": "azure_openai_embedding_endpoint",
+    "AZURE_OPENAI_EMBEDDING_API_KEY": "azure_openai_embedding_api_key",
     "AZURE_OPENAI_EMBEDDING_DEPLOYMENT": "azure_openai_embedding_deployment",
     "AZURE_STORAGE_ACCOUNT_NAME": "azure_storage_account_name",
     "AZURE_STORAGE_CONTAINER_NAME": "azure_storage_container_name",
@@ -44,6 +55,9 @@ class Settings(BaseSettings):
     environment: str = "local"
     api_prefix: str = ""
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
+    allowed_hosts: list[str] = Field(default_factory=lambda: ["localhost", "127.0.0.1", "0.0.0.0", "testserver", "backend"])
+    security_headers_enabled: bool = True
+    force_https: bool = False
 
     database_url: str = "postgresql+psycopg://airport:airport@postgres:5432/airport_lost_found"
     jwt_secret: str = "change-me-in-production"
@@ -63,7 +77,20 @@ class Settings(BaseSettings):
     azure_openai_endpoint: str | None = None
     azure_openai_api_key: str | None = None
     azure_openai_api_version: str = "2024-10-21"
+    azure_openai_responses_api_version: str = "2025-04-01-preview"
+    azure_openai_use_responses_api: bool = False
     azure_openai_chat_deployment: str | None = None
+    azure_openai_fast_deployment: str | None = None
+    azure_openai_fast_endpoint: str | None = None
+    azure_openai_fast_api_key: str | None = None
+    azure_openai_reasoning_deployment: str | None = None
+    azure_openai_reasoning_endpoint: str | None = None
+    azure_openai_reasoning_api_key: str | None = None
+    azure_openai_deep_reasoning_deployment: str | None = None
+    azure_openai_deep_reasoning_endpoint: str | None = None
+    azure_openai_deep_reasoning_api_key: str | None = None
+    azure_openai_embedding_endpoint: str | None = None
+    azure_openai_embedding_api_key: str | None = None
     azure_openai_embedding_deployment: str | None = None
 
     azure_storage_account_name: str | None = None

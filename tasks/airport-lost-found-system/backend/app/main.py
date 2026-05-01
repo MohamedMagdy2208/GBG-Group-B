@@ -2,7 +2,9 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.api import (
     ai,
@@ -26,6 +28,7 @@ from app.api import (
 from app.core.config import get_settings
 from app.core.database import engine
 from app.core.observability import request_context_middleware, setup_logging, setup_opentelemetry
+from app.core.security_middleware import security_headers_middleware, validate_production_security_settings
 from app.models import Base
 from app.services.azure_search_service import azure_search_service
 from app.services.cache_service import cache_service
@@ -37,6 +40,9 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging()
+    security_issues = validate_production_security_settings(settings)
+    if security_issues:
+        raise RuntimeError("Production security settings are not safe: " + " ".join(security_issues))
     if settings.auto_create_tables:
         Base.metadata.create_all(bind=engine)
     await cache_service.connect()
@@ -48,6 +54,11 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
 setup_opentelemetry(app)
 app.middleware("http")(request_context_middleware)
+if settings.security_headers_enabled:
+    app.middleware("http")(security_headers_middleware)
+if settings.force_https:
+    app.add_middleware(HTTPSRedirectMiddleware)
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)
 
 app.add_middleware(
     CORSMiddleware,

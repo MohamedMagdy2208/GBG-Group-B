@@ -31,8 +31,8 @@ async def generate_embedding(payload: AITextRequest, _: User = Depends(require_s
 @router.post("/summarize-match")
 async def summarize_match(payload: dict, _: User = Depends(require_staff)) -> dict:
     summary = await azure_openai_service.summarize_match_evidence(
-        payload.get("lost_text", ""),
-        payload.get("found_text", ""),
-        payload.get("score_breakdown", {}),
+        payload.get("lost_text") or payload.get("lost_report") or payload.get("lost") or "",
+        payload.get("found_text") or payload.get("found_item") or payload.get("found") or "",
+        payload.get("score_breakdown") or payload.get("score") or {},
     )
     return {"summary": summary}

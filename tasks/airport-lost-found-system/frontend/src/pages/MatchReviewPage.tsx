@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { api } from "../api/client";
 import { Badge } from "../components/Badge";
 import { PageHeader } from "../components/PageHeader";
@@ -7,6 +8,8 @@ import type { ClaimVerification, GraphContext, MatchCandidate } from "../types";
 
 export function MatchReviewPage() {
   const client = useQueryClient();
+  const [statusFilter, setStatusFilter] = useState("pending");
+  const [confidenceFilter, setConfidenceFilter] = useState("all");
   const { data = [] } = useQuery({
     queryKey: ["matches"],
     queryFn: async () => (await api.get<MatchCandidate[]>("/matches")).data,
@@ -42,12 +45,38 @@ export function MatchReviewPage() {
       client.invalidateQueries({ queryKey: ["claim-verifications"] });
     },
   });
+  const filteredMatches = data.filter((match) => {
+    const statusMatches = statusFilter === "all" || match.status === statusFilter;
+    const confidenceMatches = confidenceFilter === "all" || match.confidence_level === confidenceFilter;
+    return statusMatches && confidenceMatches;
+  });
+  const highRiskCount = data.filter((match) => ["high_value", "sensitive", "dangerous"].includes(match.found_item?.risk_level ?? "")).length;
   return (
     <section>
       <PageHeader title="Match Review" kicker="Manual approval required" action={<button onClick={() => api.post("/matches/run").then(() => client.invalidateQueries({ queryKey: ["matches"] }))} className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white">Run all</button>} />
+      <div className="mb-4 grid gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm lg:grid-cols-[1fr_auto_auto]">
+        <div>
+          <p className="text-sm font-semibold text-slate-950">{filteredMatches.length} matches in view</p>
+          <p className="mt-1 text-xs text-slate-500">{highRiskCount} candidates require extra risk attention.</p>
+        </div>
+        <select className="focus-ring rounded-lg border border-slate-200 px-3 py-2 text-sm" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} aria-label="Status filter">
+          <option value="pending">Pending</option>
+          <option value="approved">Approved</option>
+          <option value="needs_more_info">Needs more info</option>
+          <option value="rejected">Rejected</option>
+          <option value="all">All statuses</option>
+        </select>
+        <select className="focus-ring rounded-lg border border-slate-200 px-3 py-2 text-sm" value={confidenceFilter} onChange={(event) => setConfidenceFilter(event.target.value)} aria-label="Confidence filter">
+          <option value="all">All confidence</option>
+          <option value="high">High</option>
+          <option value="medium">Medium</option>
+          <option value="low">Low</option>
+        </select>
+      </div>
       <div className="grid gap-4">
-        {data.map((match) => {
+        {filteredMatches.map((match) => {
           const claim = claims.find((item) => item.match_candidate_id === match.id);
+          const isClosed = match.status === "approved" || match.status === "rejected";
           return (
           <article key={match.id} className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
             <div className="grid gap-4 lg:grid-cols-[1fr_260px_220px]">
@@ -70,15 +99,20 @@ export function MatchReviewPage() {
               <ScoreBreakdown match={match} />
               <div className="grid content-start gap-2">
                 <p className="text-3xl font-semibold text-slate-950">{match.match_score.toFixed(0)}%</p>
-                <button onClick={() => action.mutate({ id: match.id, verb: "approve" })} className="rounded-lg bg-radar px-3 py-2 text-sm font-semibold text-white">Approve</button>
+                <button disabled={isClosed} onClick={() => action.mutate({ id: match.id, verb: "approve" })} className="rounded-lg bg-radar px-3 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">Approve</button>
                 <button onClick={() => createClaim.mutate(match.id)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-800">Create claim check</button>
                 <button onClick={() => claim && release.mutate(claim)} disabled={claim?.status !== "approved"} className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">Release</button>
-                <button onClick={() => action.mutate({ id: match.id, verb: "needs-more-info" })} className="rounded-lg border border-amber-300 px-3 py-2 text-sm font-semibold text-amber-800">More info</button>
-                <button onClick={() => action.mutate({ id: match.id, verb: "reject" })} className="rounded-lg border border-rose-300 px-3 py-2 text-sm font-semibold text-rose-800">Reject</button>
+                <button disabled={isClosed} onClick={() => action.mutate({ id: match.id, verb: "needs-more-info" })} className="rounded-lg border border-amber-300 px-3 py-2 text-sm font-semibold text-amber-800 disabled:cursor-not-allowed disabled:opacity-40">More info</button>
+                <button disabled={isClosed} onClick={() => action.mutate({ id: match.id, verb: "reject" })} className="rounded-lg border border-rose-300 px-3 py-2 text-sm font-semibold text-rose-800 disabled:cursor-not-allowed disabled:opacity-40">Reject</button>
               </div>
             </div>
           </article>
         )})}
+        {filteredMatches.length === 0 ? (
+          <div className="rounded-lg border border-slate-200 bg-white p-6 text-sm text-slate-500 shadow-sm">
+            No matches meet the current filters.
+          </div>
+        ) : null}
       </div>
     </section>
   );

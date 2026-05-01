@@ -52,9 +52,9 @@ async def create_found_item(
     )
     enqueue_outbox(db, "found_item.created", "found_item", item.id, {"category": item.category, "risk_level": item.risk_level.value})
     enqueue_job(db, "graph.summary.generate", {"entity_type": "found_item", "entity_id": item.id})
+    enqueue_job(db, "matching.found_item", {"found_item_id": item.id})
     store_idempotent_response(db, "found_item.create", idempotency_key, hash_value, {"found_item_id": item.id}, status.HTTP_201_CREATED)
     db.commit()
-    await run_matching_for_found_item(db, item)
     await invalidate_operational_caches()
     return item
 

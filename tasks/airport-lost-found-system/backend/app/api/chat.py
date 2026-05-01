@@ -324,7 +324,7 @@ def _status_message(language: str, report_code: str, report_status: str, best: f
         )
     return (
         f"Report {report_code} is {report_status}. "
-        f"Best current match confidence is {best:.0f}/100. "
+        f"Best current staff review score is {best:.0f}/100. "
         "Airport staff will contact you if manual verification is needed."
     )
 

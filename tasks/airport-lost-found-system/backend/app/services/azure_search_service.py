@@ -7,7 +7,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.models import FoundItem, LostReport
+from app.models import FoundItem, FoundItemStatus, LostReport, LostReportStatus
 
 
 logger = logging.getLogger(__name__)
@@ -53,6 +53,22 @@ class AzureSearchService:
             return
         await asyncio.to_thread(self._create_or_update_index_sync)
         logger.info("Azure AI Search index ready", extra={"event": "search_index_ready"})
+
+    async def recreate_index(self) -> None:
+        if not self._enabled():
+            logger.info("local search fallback index reset", extra={"event": "search_index_reset"})
+            return
+        await asyncio.to_thread(self._delete_index_if_exists_sync)
+        await asyncio.to_thread(self._create_or_update_index_sync)
+        logger.info("Azure AI Search index recreated", extra={"event": "search_index_recreated"})
+
+    def _delete_index_if_exists_sync(self) -> None:
+        from azure.core.exceptions import ResourceNotFoundError
+
+        try:
+            self._index_client().delete_index(self.settings.azure_search_index_name)
+        except ResourceNotFoundError:
+            return
 
     def _create_or_update_index_sync(self) -> None:
         from azure.search.documents.indexes.models import (
@@ -122,30 +138,32 @@ class AzureSearchService:
         await asyncio.to_thread(self._search_client().delete_documents, [{"document_id": document_id}])
 
     async def hybrid_search_found_items(self, db: Session, report: LostReport, limit: int = 10) -> list[tuple[FoundItem, float]]:
+        query_text = self._lost_text(report)
         if self._enabled():
-            query_text = self._lost_text(report)
             results = await self._azure_hybrid_search(
                 query_text=query_text,
                 filter_expression="source_type eq 'found_item' and status ne 'released' and status ne 'disposed'",
                 limit=limit,
             )
-            return self._materialize_found_items(db, results)
-        items = db.query(FoundItem).all()
-        query_text = self._lost_text(report)
+            azure_items = self._materialize_found_items(db, results)
+            rule_items = self._rule_recall_found_items(db, report, query_text, limit)
+            return self._merge_candidates(azure_items, rule_items, limit)
+        items = self._candidate_found_items(db)
         scored = [(item, self._similarity(query_text, self._found_text(item))) for item in items]
         return sorted(scored, key=lambda pair: pair[1], reverse=True)[:limit]
 
     async def hybrid_search_lost_reports(self, db: Session, item: FoundItem, limit: int = 10) -> list[tuple[LostReport, float]]:
+        query_text = self._found_text(item)
         if self._enabled():
-            query_text = self._found_text(item)
             results = await self._azure_hybrid_search(
                 query_text=query_text,
                 filter_expression="source_type eq 'lost_report' and status ne 'resolved' and status ne 'rejected'",
                 limit=limit,
             )
-            return self._materialize_lost_reports(db, results)
-        reports = db.query(LostReport).all()
-        query_text = self._found_text(item)
+            azure_reports = self._materialize_lost_reports(db, results)
+            rule_reports = self._rule_recall_lost_reports(db, item, query_text, limit)
+            return self._merge_candidates(azure_reports, rule_reports, limit)
+        reports = self._candidate_lost_reports(db)
         scored = [(report, self._similarity(query_text, self._lost_text(report))) for report in reports]
         return sorted(scored, key=lambda pair: pair[1], reverse=True)[:limit]
 
@@ -221,6 +239,63 @@ class AzureSearchService:
                 reports.append((report, result["score"]))
         return reports
 
+    def _rule_recall_found_items(self, db: Session, report: LostReport, query_text: str, limit: int) -> list[tuple[FoundItem, float]]:
+        scored = [
+            (item, self._rule_recall_score(query_text, self._found_text(item), report.category, item.category, report.color, item.color, report.lost_location, item.found_location))
+            for item in self._candidate_found_items(db)
+        ]
+        return sorted(scored, key=lambda pair: pair[1], reverse=True)[: max(limit, 10)]
+
+    def _rule_recall_lost_reports(self, db: Session, item: FoundItem, query_text: str, limit: int) -> list[tuple[LostReport, float]]:
+        scored = [
+            (report, self._rule_recall_score(query_text, self._lost_text(report), item.category, report.category, item.color, report.color, item.found_location, report.lost_location))
+            for report in self._candidate_lost_reports(db)
+        ]
+        return sorted(scored, key=lambda pair: pair[1], reverse=True)[: max(limit, 10)]
+
+    def _candidate_found_items(self, db: Session) -> list[FoundItem]:
+        return (
+            db.query(FoundItem)
+            .filter(FoundItem.status.notin_([FoundItemStatus.released, FoundItemStatus.disposed]))
+            .all()
+        )
+
+    def _candidate_lost_reports(self, db: Session) -> list[LostReport]:
+        return (
+            db.query(LostReport)
+            .filter(LostReport.status.notin_([LostReportStatus.resolved, LostReportStatus.rejected]))
+            .all()
+        )
+
+    def _merge_candidates(self, primary: list[tuple[Any, float]], recall: list[tuple[Any, float]], limit: int) -> list[tuple[Any, float]]:
+        merged: dict[int, tuple[Any, float]] = {}
+        for entity, score in [*primary, *recall]:
+            entity_id = int(entity.id)
+            current = merged.get(entity_id)
+            if current is None or score > current[1]:
+                merged[entity_id] = (entity, score)
+        return sorted(merged.values(), key=lambda pair: pair[1], reverse=True)[:limit]
+
+    def _rule_recall_score(
+        self,
+        query_text: str,
+        candidate_text: str,
+        query_category: str | None,
+        candidate_category: str | None,
+        query_color: str | None,
+        candidate_color: str | None,
+        query_location: str | None,
+        candidate_location: str | None,
+    ) -> float:
+        score = self._similarity(query_text, candidate_text)
+        if self._same(query_category, candidate_category):
+            score += 12
+        if self._same(query_color, candidate_color):
+            score += 8
+        if self._same(query_location, candidate_location):
+            score += 12
+        return round(min(score, 100), 2)
+
     async def _lost_report_document(self, report: LostReport) -> dict[str, Any]:
         from app.services.azure_openai_service import azure_openai_service
 
@@ -271,6 +346,9 @@ class AzureSearchService:
 
     def _similarity(self, left: str, right: str) -> float:
         return round(SequenceMatcher(None, left.lower(), right.lower()).ratio() * 100, 2)
+
+    def _same(self, left: str | None, right: str | None) -> bool:
+        return bool(left and right and left.strip().lower() == right.strip().lower())
 
     def _lost_text(self, report: LostReport) -> str:
         return " ".join(

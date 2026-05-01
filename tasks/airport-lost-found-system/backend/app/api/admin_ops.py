@@ -10,9 +10,27 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.rbac import require_admin, require_roles
-from app.models import AuditSeverity, BackgroundJob, ChatMessage, ChatSession, ClaimVerification, LostReport, Notification, OutboxEvent, User, UserRole, WorkStatus
+from app.api.utils import invalidate_operational_caches, run_matching_for_lost_report
+from app.models import (
+    AuditSeverity,
+    BackgroundJob,
+    ChatMessage,
+    ChatSession,
+    ClaimVerification,
+    FoundItem,
+    FoundItemStatus,
+    LostReport,
+    LostReportStatus,
+    Notification,
+    OutboxEvent,
+    User,
+    UserRole,
+    WorkStatus,
+)
 from app.schemas import BackgroundJobRead, DataRetentionRunResponse, DeepHealthResponse, OutboxEventRead, UserRead
 from app.services.audit_service import log_audit_event
+from app.services.azure_openai_service import azure_openai_service
+from app.services.azure_search_service import azure_search_service
 from app.services.cache_service import cache_service
 
 
@@ -61,6 +79,139 @@ def list_outbox(
     if status_filter:
         query = query.filter(OutboxEvent.status == status_filter)
     return query.order_by(OutboxEvent.created_at.desc()).limit(200).all()
+
+
+@router.post("/search/recreate-index")
+async def recreate_search_index(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(UserRole.admin, UserRole.security)),
+) -> dict[str, Any]:
+    await azure_search_service.recreate_index()
+    log_audit_event(
+        db,
+        action="admin.search_index_recreated",
+        entity_type="search_index",
+        actor=current_user,
+        severity=AuditSeverity.warning,
+        request=request,
+    )
+    db.commit()
+    await invalidate_operational_caches()
+    return {"status": "ok", "index": get_settings().azure_search_index_name}
+
+
+@router.post("/search/reindex-lost-reports")
+async def reindex_lost_reports(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(UserRole.admin, UserRole.security)),
+) -> dict[str, Any]:
+    result = await _reindex_lost_reports(db)
+    log_audit_event(
+        db,
+        action="admin.lost_reports_reindexed",
+        entity_type="search_index",
+        actor=current_user,
+        metadata=result,
+        request=request,
+    )
+    db.commit()
+    await invalidate_operational_caches()
+    return result
+
+
+@router.post("/search/reindex-found-items")
+async def reindex_found_items(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(UserRole.admin, UserRole.security)),
+) -> dict[str, Any]:
+    result = await _reindex_found_items(db)
+    log_audit_event(
+        db,
+        action="admin.found_items_reindexed",
+        entity_type="search_index",
+        actor=current_user,
+        metadata=result,
+        request=request,
+    )
+    db.commit()
+    await invalidate_operational_caches()
+    return result
+
+
+@router.post("/search/reindex-all")
+async def reindex_all_search_documents(
+    request: Request,
+    recreate_index: bool = False,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(UserRole.admin, UserRole.security)),
+) -> dict[str, Any]:
+    if recreate_index:
+        await azure_search_service.recreate_index()
+    lost = await _reindex_lost_reports(db)
+    found = await _reindex_found_items(db)
+    result = {
+        "status": "ok" if not lost["failed"] and not found["failed"] else "partial",
+        "recreated_index": recreate_index,
+        "lost_reports": lost,
+        "found_items": found,
+    }
+    log_audit_event(
+        db,
+        action="admin.search_reindex_all",
+        entity_type="search_index",
+        actor=current_user,
+        severity=AuditSeverity.warning if recreate_index else AuditSeverity.info,
+        metadata=result,
+        request=request,
+    )
+    db.commit()
+    await invalidate_operational_caches()
+    return result
+
+
+@router.post("/matching/rerun-all")
+async def rerun_matching(
+    request: Request,
+    limit: int | None = Query(default=None, ge=1, le=500),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(UserRole.admin, UserRole.security)),
+) -> dict[str, Any]:
+    query = (
+        db.query(LostReport)
+        .filter(LostReport.status.notin_([LostReportStatus.resolved, LostReportStatus.rejected]))
+        .order_by(LostReport.created_at.desc())
+    )
+    if limit:
+        query = query.limit(limit)
+    reports = query.all()
+    created_or_updated = 0
+    failed: list[dict[str, Any]] = []
+    for report in reports:
+        try:
+            created_or_updated += len(await run_matching_for_lost_report(db, report))
+        except Exception as exc:
+            failed.append({"lost_report_id": report.id, "error": str(exc)})
+    result = {
+        "status": "ok" if not failed else "partial",
+        "scanned_lost_reports": len(reports),
+        "match_candidates_returned": created_or_updated,
+        "failed": failed,
+    }
+    log_audit_event(
+        db,
+        action="admin.matching_rerun_all",
+        entity_type="match_candidate",
+        actor=current_user,
+        severity=AuditSeverity.warning if failed else AuditSeverity.info,
+        metadata=result,
+        request=request,
+    )
+    db.commit()
+    await invalidate_operational_caches()
+    return result
 
 
 @router.post("/data-retention/run", response_model=DataRetentionRunResponse)
@@ -194,6 +345,7 @@ def _provider_status() -> dict[str, Any]:
         "graph_rag_provider": settings.graph_rag_provider,
         "azure": {
             "openai_configured": bool(settings.azure_openai_endpoint and settings.azure_openai_chat_deployment),
+            "openai_routes": azure_openai_service.route_deployments(),
             "search_configured": bool(settings.azure_search_endpoint and settings.azure_search_key),
             "blob_configured": bool(settings.azure_storage_connection_string or settings.azure_storage_account_name),
             "vision_configured": bool(settings.azure_ai_vision_endpoint and settings.azure_ai_vision_key),
@@ -201,6 +353,39 @@ def _provider_status() -> dict[str, Any]:
             "application_insights_configured": bool(settings.applicationinsights_connection_string),
         },
     }
+
+
+async def _reindex_lost_reports(db: Session) -> dict[str, Any]:
+    reports = db.query(LostReport).order_by(LostReport.id).all()
+    indexed = 0
+    failed: list[dict[str, Any]] = []
+    for report in reports:
+        try:
+            report.search_document_id = await azure_search_service.index_lost_report(report)
+            db.add(report)
+            indexed += 1
+        except Exception as exc:
+            failed.append({"lost_report_id": report.id, "error": str(exc)})
+    return {"status": "ok" if not failed else "partial", "scanned": len(reports), "indexed": indexed, "failed": failed}
+
+
+async def _reindex_found_items(db: Session) -> dict[str, Any]:
+    items = (
+        db.query(FoundItem)
+        .filter(FoundItem.status.notin_([FoundItemStatus.disposed]))
+        .order_by(FoundItem.id)
+        .all()
+    )
+    indexed = 0
+    failed: list[dict[str, Any]] = []
+    for item in items:
+        try:
+            item.search_document_id = await azure_search_service.index_found_item(item)
+            db.add(item)
+            indexed += 1
+        except Exception as exc:
+            failed.append({"found_item_id": item.id, "error": str(exc)})
+    return {"status": "ok" if not failed else "partial", "scanned": len(items), "indexed": indexed, "failed": failed}
 
 
 @health_router.get("/health/ready/deep", response_model=DeepHealthResponse)

@@ -237,5 +237,13 @@ export type ProviderStatus = {
   cache_backend: string;
   voice_provider: string;
   graph_rag_provider: string;
-  azure: Record<string, boolean>;
+  azure: {
+    openai_configured: boolean;
+    openai_routes?: Record<string, string | null>;
+    search_configured: boolean;
+    blob_configured: boolean;
+    vision_configured: boolean;
+    communication_configured: boolean;
+    application_insights_configured: boolean;
+  };
 };

@@ -45,7 +45,7 @@ flowchart LR
 ```
 
 ## Azure Services Used
-- Azure OpenAI: description cleanup, attribute extraction, embeddings, match summaries, chatbot follow-up questions.
+- Azure OpenAI: description cleanup, attribute extraction, embeddings, match summaries, chatbot follow-up questions, and model routing by workload.
 - Azure AI Search: hybrid search, keyword search, vector search, filtering, candidate retrieval.
 - Azure Blob Storage: found item images, proof documents, uploaded photos, secure URL generation.
 - Azure AI Vision: image tags, captions, object detection, OCR.
@@ -112,6 +112,9 @@ See `.env.example` for the complete list. Key local variables are:
 - `USE_AZURE_SERVICES`
 - `VITE_API_URL`
 - `AZURE_KEY_VAULT_URL`
+- `AZURE_OPENAI_FAST_DEPLOYMENT`
+- `AZURE_OPENAI_REASONING_DEPLOYMENT`
+- `AZURE_OPENAI_DEEP_REASONING_DEPLOYMENT`
 - `AZURE_SEARCH_VECTOR_DIMENSIONS`
 - `VOICE_FEATURES_ENABLED`
 - `VOICE_PROVIDER`
@@ -126,6 +129,15 @@ See `.env.example` for the complete list. Key local variables are:
 - `WORKER_POLL_INTERVAL_SECONDS`
 - `OUTBOX_MAX_ATTEMPTS`
 - `PROOF_DOCUMENT_RETENTION_DAYS`
+
+Azure OpenAI routing is optional but recommended in production:
+- Fast route: `AZURE_OPENAI_FAST_*` for cleanup, attribute extraction, chatbot follow-up questions, and other high-volume calls.
+- Reasoning route: `AZURE_OPENAI_REASONING_*` for match evidence and Graph RAG summaries.
+- Deep route: `AZURE_OPENAI_DEEP_REASONING_*` reserved for heavier staff-assistance workflows that need the strongest model.
+
+If a route-specific endpoint or key is omitted, the backend falls back to the main `AZURE_OPENAI_ENDPOINT` and `AZURE_OPENAI_API_KEY`. AI cache keys include the deployment name so model changes do not reuse stale cached outputs.
+
+Set `AZURE_OPENAI_USE_RESPONSES_API=true` only when the configured Azure OpenAI resource supports the Responses API for those deployments. Otherwise the backend uses Chat Completions directly to avoid a fallback retry on every request.
 
 ## Backend
 ```bash
@@ -234,6 +246,11 @@ Docker Compose runs the worker automatically. The current pilot still performs i
 - `GET /admin/jobs`: background job monitoring.
 - `POST /admin/jobs/{id}/retry`: retry failed/dead-letter jobs.
 - `GET /admin/outbox`: durable event monitoring.
+- `POST /admin/search/recreate-index`: recreate the Azure AI Search index schema.
+- `POST /admin/search/reindex-lost-reports`: push all lost reports back into search.
+- `POST /admin/search/reindex-found-items`: push all active found items back into search.
+- `POST /admin/search/reindex-all?recreate_index=true`: recreate the index and repopulate all search documents.
+- `POST /admin/matching/rerun-all`: rerun candidate matching for active lost reports. Add `?limit=1` for a small smoke test.
 - `POST /admin/data-retention/run`: conservative transcript retention cleanup.
 - `POST /admin/users/{id}/disable`: disable an account with audit logging.
 - `GET /admin/users/{id}/data-export`: passenger data discovery for privacy requests.
@@ -268,6 +285,10 @@ Candidate matching uses Azure AI Search hybrid vector/text results first, then a
 - Passwords are hashed.
 - JWT protects private APIs.
 - RBAC separates passenger, staff, admin, and security actions.
+- Production/staging startup validates non-default secrets, explicit CORS origins, explicit host allow-lists, and HTTPS enforcement.
+- Trusted host checks use `ALLOWED_HOSTS`.
+- Security response headers are enabled by default with `SECURITY_HEADERS_ENABLED=true`.
+- HTTPS redirect can be enforced with `FORCE_HTTPS=true` behind production ingress.
 - Uploads validate file type and size.
 - Local URLs are used only in development; Azure mode uses secure blob access patterns.
 - Passenger status checks expose limited information only.
@@ -275,6 +296,21 @@ Candidate matching uses Azure AI Search hybrid vector/text results first, then a
 - Claim verification and release actions create immutable audit records.
 - QR scan events create custody notes without exposing passenger PII.
 - Manual approval is required before release.
+
+## Automated Tests
+Backend tests cover security masking/password/MFA helpers, security headers and production config validation, idempotency, Graph RAG privacy, and matching-engine edge cases:
+
+```bash
+cd backend
+pytest
+```
+
+Frontend smoke tests verify critical public, staff, and admin routes plus operations endpoints, then run the TypeScript production build:
+
+```bash
+cd frontend
+npm test
+```
 
 ## Future Improvements
 - WhatsApp integration.

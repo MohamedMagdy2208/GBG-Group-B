@@ -85,7 +85,7 @@ jobs:
           VITE_API_URL: http://localhost:8000
         run: |
           npm ci
-          npm run build
+          npm test
 
       - name: Docker build smoke tests
         run: |

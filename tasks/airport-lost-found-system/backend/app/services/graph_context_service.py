@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from datetime import UTC, datetime
 from typing import Any
 
@@ -20,6 +21,9 @@ from app.models import (
 )
 from app.services.azure_openai_service import azure_openai_service
 from app.services.cache_service import cache_service
+
+
+logger = logging.getLogger(__name__)
 
 
 class GraphContextBuilder:
@@ -265,7 +269,7 @@ class GraphContextService:
         self._add_found_side_context(db, builder, candidate.found_item_id)
         self._add_report_side_context(db, builder, candidate.lost_report_id)
         context = builder.graph("match_neighborhood", "match_candidate", match_id, question or "Explain this match using graph evidence.")
-        context["generated_summary"] = await azure_openai_service.summarize_graph_context(context, question)
+        context["generated_summary"] = await self._safe_summary(context, question)
         await cache_service.set_json(cache_key, context, get_settings().graph_rag_context_ttl_seconds)
         return context
 
@@ -286,7 +290,7 @@ class GraphContextService:
         ):
             builder.add_match(candidate)
         context = builder.graph("found_item_neighborhood", "found_item", item_id, question or "Explain this found item graph.")
-        context["generated_summary"] = await azure_openai_service.summarize_graph_context(context, question)
+        context["generated_summary"] = await self._safe_summary(context, question)
         return context
 
     async def lost_report_context(self, db: Session, report_id: int, question: str | None = None) -> dict[str, Any]:
@@ -311,8 +315,22 @@ class GraphContextService:
         ):
             builder.add_match(candidate)
         context = builder.graph("lost_report_neighborhood", "lost_report", report_id, question or "Explain this lost report graph.")
-        context["generated_summary"] = await azure_openai_service.summarize_graph_context(context, question)
+        context["generated_summary"] = await self._safe_summary(context, question)
         return context
+
+    async def _safe_summary(self, context: dict[str, Any], question: str | None = None) -> str:
+        try:
+            return await azure_openai_service.summarize_graph_context(context, question)
+        except Exception:
+            logger.exception("Graph RAG summary failed; using deterministic fallback", extra={"event": "graph_summary_fallback"})
+            evidence = context.get("evidence") or []
+            risks = context.get("risk_signals") or []
+            summary = "Graph context is available for staff review."
+            if evidence:
+                summary += " Evidence: " + "; ".join(str(item) for item in evidence[:3]) + "."
+            if risks:
+                summary += " Risk signals: " + "; ".join(str(item) for item in risks[:3]) + "."
+            return summary
 
     def _add_found_side_context(self, db: Session, builder: GraphContextBuilder, item_id: int) -> None:
         for event in (

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import asyncio
 import time
 
 from app.core.config import get_settings
@@ -20,7 +21,7 @@ def main() -> None:
         db = SessionLocal()
         try:
             outbox_count = worker_service.process_outbox_once(db)
-            job_count = worker_service.process_jobs_once(db)
+            job_count = asyncio.run(worker_service.process_jobs_once(db))
             if outbox_count or job_count:
                 logger.info(
                     "worker processed work",
