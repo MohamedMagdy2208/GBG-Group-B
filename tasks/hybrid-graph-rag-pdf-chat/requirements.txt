@@ -1,9 +1,0 @@
-chromadb>=0.5.0
-neo4j>=5.20.0
-openai>=1.35.0
-pydantic>=2.7.0
-pypdf>=4.2.0
-pytest>=8.2.0
-streamlit>=1.36.0
-tenacity>=8.3.0
-
