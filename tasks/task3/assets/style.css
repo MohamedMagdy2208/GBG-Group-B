@@ -1,0 +1,33 @@
+/* Azure Document Intelligence — Custom Streamlit Styles */
+
+/* Header */
+h1 { color: #0078D4; }
+
+/* Divider */
+hr { border-color: #0078D4; opacity: 0.2; }
+
+/* Primary button */
+.stButton > button[kind="primary"] {
+    background-color: #0078D4;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    padding: 0.5rem 1.5rem;
+    font-weight: 600;
+    transition: background 0.2s;
+}
+.stButton > button[kind="primary"]:hover {
+    background-color: #005a9e;
+}
+
+/* File uploader drop zone */
+.stFileUploader { border: 2px dashed #0078D4; border-radius: 8px; padding: 1rem; }
+
+/* JSON block */
+.stJson { font-size: 0.82rem; }
+
+/* Dataframe */
+.stDataFrame { border-radius: 8px; overflow: hidden; }
+
+/* Info / Warning boxes */
+.stAlert { border-radius: 8px; }

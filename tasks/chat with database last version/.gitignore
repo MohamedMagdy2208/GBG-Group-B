@@ -1,0 +1,15 @@
+.env
+.env.*
+!.env.example
+__pycache__/
+*.pyc
+.streamlit/
+venv/
+.venv/
+*.egg-info/
+dist/
+build/
+.DS_Store
+.env
+Chinhook/
+.claude/

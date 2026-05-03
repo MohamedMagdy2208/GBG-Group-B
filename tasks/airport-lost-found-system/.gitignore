@@ -1,0 +1,16 @@
+.env
+__pycache__/
+*.pyc
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+node_modules/
+dist/
+*.tsbuildinfo
+*.db
+local_uploads/
+backend/local_uploads/*
+!backend/local_uploads/.gitkeep
+.venv/
+.idea/
+.vscode/
