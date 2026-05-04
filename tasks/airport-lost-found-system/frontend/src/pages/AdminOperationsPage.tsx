@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import axios from "axios";
 import { Activity, Database, RefreshCw, ServerCog, ShieldCheck } from "lucide-react";
 import type React from "react";
 import { useState } from "react";
@@ -6,10 +7,21 @@ import { api } from "../api/client";
 import { Badge } from "../components/Badge";
 import { PageHeader } from "../components/PageHeader";
 import { StatCard } from "../components/StatCard";
+import { useToast } from "../components/Toast";
 import type { BackgroundJob, DeepHealth, OutboxEvent, ProviderStatus } from "../types";
+
+function describeError(error: unknown, fallback: string): string {
+  if (axios.isAxiosError(error)) {
+    const detail = error.response?.data?.detail;
+    if (typeof detail === "string") return detail;
+    if (error.message) return error.message;
+  }
+  return fallback;
+}
 
 export function AdminOperationsPage() {
   const queryClient = useQueryClient();
+  const toast = useToast();
   const [lastAdminAction, setLastAdminAction] = useState<Record<string, unknown> | null>(null);
   const { data: jobs = [] } = useQuery({
     queryKey: ["admin-jobs"],
@@ -31,18 +43,24 @@ export function AdminOperationsPage() {
 
   const retryJob = useMutation({
     mutationFn: async (jobId: number) => (await api.post(`/admin/jobs/${jobId}/retry`)).data,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin-jobs"] }),
+    onSuccess: (_d, jobId) => {
+      queryClient.invalidateQueries({ queryKey: ["admin-jobs"] });
+      toast.push(`Job #${jobId} re-queued.`, "success");
+    },
+    onError: (error, jobId) => toast.push(describeError(error, `Could not retry job #${jobId}.`), "error"),
   });
   const adminAction = useMutation({
-    mutationFn: async ({ endpoint }: { endpoint: string }) => (await api.post<Record<string, unknown>>(endpoint)).data,
-    onSuccess: (data) => {
+    mutationFn: async ({ endpoint }: { endpoint: string; label: string }) => (await api.post<Record<string, unknown>>(endpoint)).data,
+    onSuccess: (data, variables) => {
       setLastAdminAction(data);
       queryClient.invalidateQueries({ queryKey: ["deep-health"] });
       queryClient.invalidateQueries({ queryKey: ["provider-status"] });
       queryClient.invalidateQueries({ queryKey: ["admin-jobs"] });
       queryClient.invalidateQueries({ queryKey: ["admin-outbox"] });
       queryClient.invalidateQueries({ queryKey: ["matches"] });
+      toast.push(`${variables.label} completed.`, "success");
     },
+    onError: (error, variables) => toast.push(describeError(error, `${variables.label} failed.`), "error"),
   });
 
   const pendingJobs = jobs.filter((job) => job.status === "pending" || job.status === "failed").length;
@@ -149,16 +167,21 @@ function AdminActionButton({
 }: {
   label: string;
   endpoint: string;
-  mutation: { isPending: boolean; mutate: (payload: { endpoint: string }) => void };
+  mutation: {
+    isPending: boolean;
+    variables?: { endpoint: string; label: string };
+    mutate: (payload: { endpoint: string; label: string }) => void;
+  };
 }) {
+  const isThisRunning = mutation.isPending && mutation.variables?.endpoint === endpoint;
   return (
     <button
-      className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+      className="focus-ring inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
       disabled={mutation.isPending}
-      onClick={() => mutation.mutate({ endpoint })}
+      onClick={() => mutation.mutate({ endpoint, label })}
     >
-      <RefreshCw className={`h-4 w-4 ${mutation.isPending ? "animate-spin" : ""}`} />
-      {label}
+      <RefreshCw className={`h-4 w-4 ${isThisRunning ? "animate-spin" : ""}`} />
+      {isThisRunning ? "Running..." : label}
     </button>
   );
 }

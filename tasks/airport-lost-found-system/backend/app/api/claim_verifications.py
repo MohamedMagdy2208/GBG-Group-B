@@ -30,6 +30,7 @@ from app.schemas import (
     FraudScoreResponse,
 )
 from app.services.audit_service import log_audit_event
+from app.services.azure_openai_service import azure_openai_service
 from app.services.azure_search_service import azure_search_service
 from app.services.cache_service import cache_service
 from app.services.fraud_risk_service import fraud_risk_service
@@ -66,7 +67,26 @@ async def create_claim_verification(
     if existing:
         return existing
 
-    questions = (payload.verification_questions_json if payload else None) or _default_questions(candidate)
+    questions = (payload.verification_questions_json if payload else None)
+    if not questions:
+        try:
+            generated = await azure_openai_service.generate_verification_questions(
+                candidate.found_item.ai_extracted_attributes_json or {},
+                candidate.found_item.vision_tags_json or [],
+                candidate.found_item.vision_ocr_text,
+                category=candidate.found_item.category,
+            )
+            questions = [entry["question"] for entry in generated]
+            # Stash expected answers privately for staff (NEVER returned to passenger).
+            candidate.found_item.ai_extracted_attributes_json = {
+                **(candidate.found_item.ai_extracted_attributes_json or {}),
+                "_verification_keys": [entry.get("expected_keywords", []) for entry in generated],
+            }
+            db.add(candidate.found_item)
+        except Exception:
+            questions = _default_questions(candidate)
+    if not questions:
+        questions = _default_questions(candidate)
     risk = fraud_risk_service.score_match(db, candidate)
     claim = ClaimVerification(
         match_candidate_id=candidate.id,
@@ -293,7 +313,13 @@ async def release_match(
         "item.released",
         "found_item",
         candidate.found_item_id,
-        {"claim_verification_id": claim.id, "match_candidate_id": match_id, "fraud_score": claim.fraud_score},
+        {
+            "claim_verification_id": claim.id,
+            "match_candidate_id": match_id,
+            "fraud_score": claim.fraud_score,
+            "lost_report_id": candidate.lost_report_id,
+            "report_code": candidate.lost_report.report_code if candidate.lost_report else None,
+        },
     )
     store_idempotent_response(db, "match.release", idempotency_key, hash_value, {"claim_verification_id": claim.id})
     await azure_search_service.index_found_item(candidate.found_item)

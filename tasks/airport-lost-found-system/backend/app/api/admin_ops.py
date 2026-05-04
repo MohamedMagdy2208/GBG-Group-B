@@ -389,7 +389,10 @@ async def _reindex_found_items(db: Session) -> dict[str, Any]:
 
 
 @health_router.get("/health/ready/deep", response_model=DeepHealthResponse)
-async def deep_ready(db: Session = Depends(get_db)) -> dict:
+async def deep_ready(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict:
     checks: dict[str, dict[str, Any]] = {}
     checks["postgres"] = _check_postgres(db)
     checks["redis"] = await _check_redis()
@@ -397,9 +400,26 @@ async def deep_ready(db: Session = Depends(get_db)) -> dict:
     checks["search"] = _check_search()
     checks["outbox"] = _check_outbox(db)
     checks["worker_queue"] = _check_worker_queue(db)
-    checks["providers"] = {"status": "ok", "details": _provider_status()}
+    if _is_authenticated_admin(request, db):
+        checks["providers"] = {"status": "ok", "details": _provider_status()}
     overall = "ready" if all(check["status"] == "ok" for check in checks.values()) else "degraded"
     return {"status": overall, "checks": checks}
+
+
+def _is_authenticated_admin(request: Request, db: Session) -> bool:
+    auth = request.headers.get("authorization") or request.headers.get("Authorization")
+    if not auth or not auth.lower().startswith("bearer "):
+        return False
+    from app.core.security import decode_access_token
+
+    token = auth.split(" ", 1)[1].strip()
+    try:
+        payload = decode_access_token(token)
+        user_id = int(payload.get("sub"))
+    except Exception:
+        return False
+    user = db.get(User, user_id)
+    return bool(user and user.role.value in {"admin", "security"})
 
 
 def _check_postgres(db: Session) -> dict[str, Any]:

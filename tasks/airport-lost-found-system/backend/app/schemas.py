@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 from app.models import (
     AirportLocationType,
@@ -55,6 +55,18 @@ class UserUpdate(BaseModel):
     role: UserRole | None = None
     is_disabled: bool | None = None
     mfa_enabled: bool | None = None
+
+
+class NotificationPreferencesUpdate(BaseModel):
+    preferred_channel: str | None = None
+    preferred_language: str | None = None
+    consent: bool | None = None
+
+
+class NotificationPreferencesRead(BaseModel):
+    preferred_channel: str
+    preferred_language: str
+    notification_consent_at: datetime | None = None
 
 
 class LoginRequest(BaseModel):
@@ -136,6 +148,16 @@ class LostReportRead(ORMModel):
     raw_description: str
     ai_clean_description: str | None
     ai_extracted_attributes_json: dict[str, Any]
+
+    @field_validator("ai_extracted_attributes_json", mode="before")
+    @classmethod
+    def _strip_private_attrs(cls, value: Any) -> Any:
+        return {key: item for key, item in (value or {}).items() if not str(key).startswith("_")}
+
+    @field_validator("proof_blob_url", mode="after")
+    @classmethod
+    def _sign_proof_url(cls, value: Any) -> Any:
+        return _sign_blob_url(value)
     brand: str | None
     model: str | None
     color: str | None
@@ -185,6 +207,26 @@ class FoundItemUpdate(BaseModel):
     status: FoundItemStatus | None = None
 
 
+def _strip_private_keys(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {key: _strip_private_keys(item) for key, item in value.items() if not str(key).startswith("_")}
+    if isinstance(value, list):
+        return [_strip_private_keys(item) for item in value]
+    return value
+
+
+def _sign_blob_url(value: Any) -> Any:
+    """Convert a private Azure blob URL into a short-lived SAS URL the browser can fetch."""
+    if not value:
+        return value
+    try:
+        from app.services.azure_blob_service import azure_blob_service
+
+        return azure_blob_service.secure_url_from_blob_url_sync(str(value))
+    except Exception:
+        return value
+
+
 class FoundItemRead(ORMModel):
     id: int
     item_title: str
@@ -194,6 +236,16 @@ class FoundItemRead(ORMModel):
     ai_extracted_attributes_json: dict[str, Any]
     vision_tags_json: list[Any]
     vision_ocr_text: str | None
+
+    @field_validator("ai_extracted_attributes_json", mode="before")
+    @classmethod
+    def _strip_private_attrs(cls, value: Any) -> Any:
+        return _strip_private_keys(value)
+
+    @field_validator("image_blob_url", mode="after")
+    @classmethod
+    def _sign_image_url(cls, value: Any) -> Any:
+        return _sign_blob_url(value)
     brand: str | None
     model: str | None
     color: str | None
@@ -225,6 +277,7 @@ class MatchCandidateRead(ORMModel):
     unique_identifier_score: float
     confidence_level: ConfidenceLevel
     ai_match_summary: str | None
+    evidence_spans_json: dict[str, Any] = Field(default_factory=dict)
     status: MatchStatus
     review_notes: str | None
     reviewed_by_staff_id: int | None
@@ -387,6 +440,24 @@ class ImageAnalysisResponse(BaseModel):
     tags: list[dict[str, Any]]
     ocr_text: str
     objects: list[dict[str, Any]]
+
+
+class DescribeFromImageRequest(BaseModel):
+    image_url: str
+
+
+class DescribeFromImageResponse(BaseModel):
+    item_title: str
+    category: str | None = None
+    raw_description: str
+    brand: str | None = None
+    color: str | None = None
+    suggested_risk_level: RiskLevel = RiskLevel.normal
+    confidence: float = 0.0
+    vision_caption: str | None = None
+    vision_tags: list[dict[str, Any]] = Field(default_factory=list)
+    vision_ocr_text: str | None = None
+    source: str = "ai"
 
 
 class ChatSessionRead(ORMModel):

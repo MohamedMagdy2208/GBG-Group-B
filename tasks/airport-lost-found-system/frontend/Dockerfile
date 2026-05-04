@@ -2,7 +2,8 @@ FROM node:22-alpine AS dev
 
 WORKDIR /app
 COPY package.json package-lock.json* ./
-RUN npm install
+# Drop the host-generated lockfile to avoid npm bug #4828 with optional native binaries.
+RUN rm -f package-lock.json && npm install --no-audit --no-fund && npm install --no-save @rollup/rollup-linux-x64-musl @esbuild/linux-x64
 COPY . .
 EXPOSE 5173
 CMD ["npm", "run", "dev"]

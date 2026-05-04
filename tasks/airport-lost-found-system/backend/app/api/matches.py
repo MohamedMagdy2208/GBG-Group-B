@@ -5,7 +5,7 @@ from app.api.utils import add_custody_event, invalidate_operational_caches, run_
 from app.core.database import get_db
 from app.core.idempotency import find_idempotent_response, get_idempotency_key, request_hash, store_idempotent_response
 from app.core.rbac import require_staff
-from app.models import AuditSeverity, CustodyAction, FoundItem, FoundItemStatus, LostReport, MatchCandidate, MatchStatus, User
+from app.models import AuditSeverity, CustodyAction, FoundItem, FoundItemStatus, LostReport, LostReportStatus, MatchCandidate, MatchStatus, User
 from app.schemas import MatchActionRequest, MatchCandidateRead
 from app.services.audit_service import log_audit_event
 from app.services.azure_search_service import azure_search_service
@@ -44,6 +44,90 @@ def get_match(
     return candidate
 
 
+@router.post("/bulk/approve")
+async def bulk_approve(
+    payload: dict,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_staff),
+) -> dict:
+    ids = [int(item) for item in payload.get("ids", []) if item is not None]
+    if not ids:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="ids is required")
+    approved: list[int] = []
+    skipped: list[dict] = []
+    for match_id in ids:
+        candidate = (
+            db.query(MatchCandidate)
+            .filter(MatchCandidate.id == match_id)
+            .with_for_update()
+            .one_or_none()
+        )
+        if not candidate:
+            skipped.append({"id": match_id, "reason": "not_found"})
+            continue
+        if candidate.status == MatchStatus.approved:
+            approved.append(candidate.id)
+            continue
+        if candidate.found_item.risk_level.value != "normal":
+            skipped.append({"id": match_id, "reason": f"risk_{candidate.found_item.risk_level.value}"})
+            continue
+        candidate.status = MatchStatus.approved
+        candidate.review_notes = "Bulk approve"
+        candidate.reviewed_by_staff_id = current_user.id
+        candidate.lost_report.status = LostReportStatus.matched
+        candidate.found_item.status = FoundItemStatus.claimed
+        add_custody_event(db, candidate.found_item, CustodyAction.claimed, current_user.id, candidate.found_item.storage_location, "Bulk approve")
+        log_audit_event(
+            db,
+            action="match.bulk_approved",
+            entity_type="match_candidate",
+            entity_id=candidate.id,
+            actor=current_user,
+            severity=AuditSeverity.info,
+            metadata={"bulk_count": len(ids)},
+            request=request,
+        )
+        approved.append(candidate.id)
+    db.commit()
+    await invalidate_operational_caches()
+    return {"approved": approved, "skipped": skipped}
+
+
+@router.post("/bulk/reject")
+async def bulk_reject(
+    payload: dict,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_staff),
+) -> dict:
+    ids = [int(item) for item in payload.get("ids", []) if item is not None]
+    if not ids:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="ids is required")
+    rejected: list[int] = []
+    for match_id in ids:
+        candidate = db.get(MatchCandidate, match_id)
+        if not candidate or candidate.status == MatchStatus.rejected:
+            continue
+        candidate.status = MatchStatus.rejected
+        candidate.review_notes = "Bulk reject"
+        candidate.reviewed_by_staff_id = current_user.id
+        log_audit_event(
+            db,
+            action="match.bulk_rejected",
+            entity_type="match_candidate",
+            entity_id=candidate.id,
+            actor=current_user,
+            severity=AuditSeverity.info,
+            metadata={"bulk_count": len(ids)},
+            request=request,
+        )
+        rejected.append(candidate.id)
+    db.commit()
+    await invalidate_operational_caches()
+    return {"rejected": rejected}
+
+
 @router.post("/run", response_model=list[MatchCandidateRead])
 async def run_all_matches(
     db: Session = Depends(get_db),
@@ -71,13 +155,21 @@ async def approve_match(
         if candidate:
             return candidate
 
-    candidate = db.get(MatchCandidate, match_id)
+    candidate = (
+        db.query(MatchCandidate)
+        .filter(MatchCandidate.id == match_id)
+        .with_for_update()
+        .one_or_none()
+    )
     if not candidate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Match not found")
+    if candidate.status == MatchStatus.approved:
+        # Another concurrent staff click already approved; return current state.
+        return candidate
     candidate.status = MatchStatus.approved
     candidate.review_notes = payload.review_notes
     candidate.reviewed_by_staff_id = current_user.id
-    candidate.lost_report.status = candidate.lost_report.status
+    candidate.lost_report.status = LostReportStatus.matched
     candidate.found_item.status = FoundItemStatus.claimed
     add_custody_event(db, candidate.found_item, CustodyAction.claimed, current_user.id, candidate.found_item.storage_location, "Match approved")
     log_audit_event(

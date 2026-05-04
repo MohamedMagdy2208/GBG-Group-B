@@ -25,3 +25,5 @@ opentelemetry-instrumentation-fastapi==0.50b0
 opentelemetry-instrumentation-sqlalchemy==0.50b0
 opentelemetry-instrumentation-httpx==0.50b0
 qrcode==8.0
+pillow==11.0.0
+imagehash==4.3.1

@@ -7,6 +7,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.core.security import mask_sensitive_text
 from app.models import FoundItem, FoundItemStatus, LostReport, LostReportStatus
 
 
@@ -51,8 +52,22 @@ class AzureSearchService:
         if not self._enabled():
             logger.info("local search fallback ready", extra={"event": "search_index_ready"})
             return
-        await asyncio.to_thread(self._create_or_update_index_sync)
-        logger.info("Azure AI Search index ready", extra={"event": "search_index_ready"})
+        try:
+            await asyncio.to_thread(self._create_or_update_index_sync)
+            logger.info("Azure AI Search index ready", extra={"event": "search_index_ready"})
+        except Exception as exc:
+            # Fields whose vector dimension changed cannot be updated in-place — recreate as a fallback.
+            message = str(exc).lower()
+            if "cannot be changed" in message or "cannotchangeexistingfield" in message:
+                logger.warning(
+                    "Search index field schema changed — recreating index",
+                    extra={"event": "search_index_recreate_required"},
+                )
+                await asyncio.to_thread(self._delete_index_if_exists_sync)
+                await asyncio.to_thread(self._create_or_update_index_sync)
+                logger.info("Azure AI Search index recreated", extra={"event": "search_index_ready"})
+            else:
+                logger.exception("Search index update failed; continuing with local fallback", extra={"event": "search_index_failed"})
 
     async def recreate_index(self) -> None:
         if not self._enabled():
@@ -105,6 +120,14 @@ class AzureSearchService:
                 vector_search_dimensions=self.settings.azure_search_vector_dimensions,
                 vector_search_profile_name="lost-found-vector-profile",
             ),
+            SearchField(
+                name="image_vector",
+                type=SearchFieldDataType.Collection(SearchFieldDataType.Single),
+                searchable=True,
+                # Azure AI Vision multimodal embeddings are fixed at 1024 dimensions.
+                vector_search_dimensions=1024,
+                vector_search_profile_name="lost-found-vector-profile",
+            ),
         ]
         vector_search = VectorSearch(
             algorithms=[HnswAlgorithmConfiguration(name="lost-found-hnsw")],
@@ -144,12 +167,16 @@ class AzureSearchService:
                 query_text=query_text,
                 filter_expression="source_type eq 'found_item' and status ne 'released' and status ne 'disposed'",
                 limit=limit,
+                image_blob_url=report.proof_blob_url,
             )
             azure_items = self._materialize_found_items(db, results)
             rule_items = self._rule_recall_found_items(db, report, query_text, limit)
             return self._merge_candidates(azure_items, rule_items, limit)
         items = self._candidate_found_items(db)
-        scored = [(item, self._similarity(query_text, self._found_text(item))) for item in items]
+        scored = [
+            (item, self._local_score(query_text, self._found_text(item), report.proof_phash, item.image_phash))
+            for item in items
+        ]
         return sorted(scored, key=lambda pair: pair[1], reverse=True)[:limit]
 
     async def hybrid_search_lost_reports(self, db: Session, item: FoundItem, limit: int = 10) -> list[tuple[LostReport, float]]:
@@ -159,22 +186,42 @@ class AzureSearchService:
                 query_text=query_text,
                 filter_expression="source_type eq 'lost_report' and status ne 'resolved' and status ne 'rejected'",
                 limit=limit,
+                image_blob_url=item.image_blob_url,
             )
             azure_reports = self._materialize_lost_reports(db, results)
             rule_reports = self._rule_recall_lost_reports(db, item, query_text, limit)
             return self._merge_candidates(azure_reports, rule_reports, limit)
         reports = self._candidate_lost_reports(db)
-        scored = [(report, self._similarity(query_text, self._lost_text(report))) for report in reports]
+        scored = [
+            (report, self._local_score(query_text, self._lost_text(report), item.image_phash, report.proof_phash))
+            for report in reports
+        ]
         return sorted(scored, key=lambda pair: pair[1], reverse=True)[:limit]
+
+    def _local_score(self, query_text: str, candidate_text: str, query_phash: str | None, candidate_phash: str | None) -> float:
+        from app.services.image_similarity_service import image_similarity_service
+
+        text_score = self._similarity(query_text, candidate_text)
+        image_score = image_similarity_service.phash_similarity(query_phash, candidate_phash) if query_phash and candidate_phash else 0
+        if image_score:
+            return round(text_score * 0.7 + image_score * 0.3, 2)
+        return text_score
 
     async def vector_search(self, documents: list[Any], query_text: str, limit: int = 10) -> list[tuple[Any, float]]:
         scored = [(doc, self._similarity(query_text, str(doc))) for doc in documents]
         return sorted(scored, key=lambda pair: pair[1], reverse=True)[:limit]
 
-    async def _azure_hybrid_search(self, query_text: str, filter_expression: str, limit: int) -> list[dict[str, Any]]:
+    async def _azure_hybrid_search(
+        self,
+        query_text: str,
+        filter_expression: str,
+        limit: int,
+        image_blob_url: str | None = None,
+    ) -> list[dict[str, Any]]:
         from azure.search.documents.models import VectorizedQuery
 
         from app.services.azure_openai_service import azure_openai_service
+        from app.services.image_similarity_service import image_similarity_service
 
         _, embedding = await azure_openai_service.generate_embedding(query_text)
         if len(embedding) != self.settings.azure_search_vector_dimensions:
@@ -186,18 +233,35 @@ class AzureSearchService:
                     "expected_dimensions": self.settings.azure_search_vector_dimensions,
                 },
             )
-        vector_query = VectorizedQuery(
-            vector=embedding,
-            k_nearest_neighbors=max(limit, 10),
-            fields="content_vector",
-        )
+        vector_queries = [
+            VectorizedQuery(
+                vector=embedding,
+                k_nearest_neighbors=max(limit, 10),
+                fields="content_vector",
+            )
+        ]
+        if image_blob_url:
+            try:
+                pair = await image_similarity_service.compute_image_vector(image_blob_url)
+                if pair:
+                    image_vector = pair[1]
+                    if len(image_vector) == 1024:
+                        vector_queries.append(
+                            VectorizedQuery(
+                                vector=image_vector,
+                                k_nearest_neighbors=max(limit, 10),
+                                fields="image_vector",
+                            )
+                        )
+            except Exception:
+                logger.exception("image vector query skipped", extra={"event": "search_image_vector_query_failed"})
         client = self._search_client()
 
         def run_search():
             return list(
                 client.search(
                     search_text=query_text or "*",
-                    vector_queries=[vector_query],
+                    vector_queries=vector_queries,
                     filter=filter_expression,
                     select=[
                         "document_id",
@@ -298,16 +362,18 @@ class AzureSearchService:
 
     async def _lost_report_document(self, report: LostReport) -> dict[str, Any]:
         from app.services.azure_openai_service import azure_openai_service
+        from app.services.image_similarity_service import image_similarity_service
 
-        content = self._lost_text(report)
+        content = mask_sensitive_text(self._lost_text(report)) or ""
         _, embedding = await azure_openai_service.generate_embedding(content)
+        image_vector = await self._image_vector_for(report.proof_blob_url, image_similarity_service)
         return {
             "document_id": f"lost-{report.id}",
             "source_type": "lost_report",
             "source_id": report.id,
             "item_title": report.item_title,
             "category": report.category,
-            "description": report.ai_clean_description or report.raw_description,
+            "description": mask_sensitive_text(report.ai_clean_description or report.raw_description),
             "brand": report.brand,
             "model": report.model,
             "color": report.color,
@@ -318,20 +384,23 @@ class AzureSearchService:
             "risk_level": None,
             "content": content,
             "content_vector": embedding,
+            "image_vector": image_vector,
         }
 
     async def _found_item_document(self, item: FoundItem) -> dict[str, Any]:
         from app.services.azure_openai_service import azure_openai_service
+        from app.services.image_similarity_service import image_similarity_service
 
-        content = self._found_text(item)
+        content = mask_sensitive_text(self._found_text(item)) or ""
         _, embedding = await azure_openai_service.generate_embedding(content)
+        image_vector = await self._image_vector_for(item.image_blob_url, image_similarity_service)
         return {
             "document_id": f"found-{item.id}",
             "source_type": "found_item",
             "source_id": item.id,
             "item_title": item.item_title,
             "category": item.category,
-            "description": item.ai_clean_description or item.raw_description,
+            "description": mask_sensitive_text(item.ai_clean_description or item.raw_description),
             "brand": item.brand,
             "model": item.model,
             "color": item.color,
@@ -342,7 +411,23 @@ class AzureSearchService:
             "risk_level": item.risk_level.value,
             "content": content,
             "content_vector": embedding,
+            "image_vector": image_vector,
         }
+
+    async def _image_vector_for(self, blob_url: str | None, image_similarity_service: Any) -> list[float]:
+        """Return the image vector or a zero-vector placeholder so Azure Search accepts the doc.
+
+        The image_vector field is fixed at 1024 dimensions (Azure Vision multimodal output),
+        independent of the text embedding dimension.
+        """
+        if blob_url:
+            try:
+                vector_pair = await image_similarity_service.compute_image_vector(blob_url)
+                if vector_pair and len(vector_pair[1]) == 1024:
+                    return vector_pair[1]
+            except Exception:
+                logger.exception("image vector failed during indexing", extra={"event": "search_image_vector_failed"})
+        return [0.0] * 1024
 
     def _similarity(self, left: str, right: str) -> float:
         return round(SequenceMatcher(None, left.lower(), right.lower()).ratio() * 100, 2)

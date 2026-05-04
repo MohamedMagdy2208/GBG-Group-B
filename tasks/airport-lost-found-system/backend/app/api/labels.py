@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from app.api.utils import add_custody_event, invalidate_operational_caches
@@ -64,8 +65,13 @@ async def scan_label(
     if not label or label.status != BarcodeLabelStatus.active:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Active label not found")
     item = db.get(FoundItem, label.entity_id) if label.entity_type == "found_item" else None
-    label.scan_count += 1
-    label.last_scanned_at = datetime.now(UTC)
+    now = datetime.now(UTC)
+    db.execute(
+        update(BarcodeLabel)
+        .where(BarcodeLabel.id == label.id)
+        .values(scan_count=BarcodeLabel.scan_count + 1, last_scanned_at=now)
+    )
+    db.refresh(label)
     event = None
     if item:
         event = add_custody_event(

@@ -15,6 +15,7 @@ from app.api import (
     chat,
     claim_verifications,
     custody,
+    demo,
     files,
     found_items,
     graph_rag,
@@ -88,6 +89,7 @@ app.include_router(voice.router)
 app.include_router(graph_rag.router)
 app.include_router(admin_ops.router)
 app.include_router(admin_ops.health_router)
+app.include_router(demo.router)
 
 
 @app.get("/health/live")

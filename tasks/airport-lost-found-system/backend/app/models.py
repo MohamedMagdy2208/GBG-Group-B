@@ -141,6 +141,9 @@ class User(Base):
     mfa_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     mfa_secret_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    preferred_channel: Mapped[str] = mapped_column(String(16), default="email")
+    preferred_language: Mapped[str] = mapped_column(String(8), default="en")
+    notification_consent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     lost_reports: Mapped[list["LostReport"]] = relationship(back_populates="passenger")
@@ -210,6 +213,7 @@ class OutboxEvent(Base):
     max_attempts: Mapped[int] = mapped_column(Integer, default=5)
     next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    leased_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -226,6 +230,7 @@ class BackgroundJob(Base):
     max_attempts: Mapped[int] = mapped_column(Integer, default=5)
     next_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    leased_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -256,7 +261,10 @@ class LostReport(Base):
     proof_blob_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     embedding_vector_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
     search_document_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    proof_phash: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    image_vector_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
     status: Mapped[LostReportStatus] = mapped_column(Enum(LostReportStatus, native_enum=False), default=LostReportStatus.open)
+    created_from_ip: Mapped[str | None] = mapped_column(String(80), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -289,6 +297,8 @@ class FoundItem(Base):
     image_blob_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     embedding_vector_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
     search_document_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    image_phash: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    image_vector_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
     status: Mapped[FoundItemStatus] = mapped_column(Enum(FoundItemStatus, native_enum=False), default=FoundItemStatus.registered)
     created_by_staff_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -320,6 +330,7 @@ class MatchCandidate(Base):
     unique_identifier_score: Mapped[float] = mapped_column(Float, default=0)
     confidence_level: Mapped[ConfidenceLevel] = mapped_column(Enum(ConfidenceLevel, native_enum=False))
     ai_match_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    evidence_spans_json: Mapped[dict] = mapped_column(MutableDict.as_mutable(json_type()), default=dict)
     status: Mapped[MatchStatus] = mapped_column(Enum(MatchStatus, native_enum=False), default=MatchStatus.pending)
     review_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     reviewed_by_staff_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)

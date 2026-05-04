@@ -1,26 +1,155 @@
+@import url('https://rsms.me/inter/inter.css');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  color: #111827;
-  background: #f8fafc;
-  font-family:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
-    sans-serif;
+  color: #101426;
+  background: #f6f7fb;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 body {
   margin: 0;
+  background: linear-gradient(180deg, #f6f7fb 0%, #f1f3f9 100%);
+  min-height: 100vh;
 }
 
-button,
-input,
-select,
-textarea {
+button, input, select, textarea {
   font: inherit;
+  letter-spacing: -0.005em;
 }
 
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+::selection {
+  background-color: rgba(245, 158, 11, 0.25);
+  color: #1a2a4f;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(15, 26, 54, 0.12);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(15, 26, 54, 0.2);
+  background-clip: padding-box;
+  border: 2px solid transparent;
+}
+
+/* Apple-style focus ring */
 .focus-ring {
-  @apply focus:outline-none focus:ring-2 focus:ring-sky/40 focus:ring-offset-2;
+  @apply focus:outline-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-navy-500/40 focus-visible:ring-offset-2 focus-visible:ring-offset-white transition-shadow;
+}
+
+.focus-ring-gold {
+  @apply focus:outline-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold-500/40 focus-visible:ring-offset-2 focus-visible:ring-offset-white transition-shadow;
+}
+
+/* Glass surfaces (Apple-style translucent) */
+.glass {
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: saturate(180%) blur(18px);
+  -webkit-backdrop-filter: saturate(180%) blur(18px);
+}
+
+.glass-dark {
+  background: rgba(15, 26, 54, 0.78);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+}
+
+/* Inter numerals look better when monospaced for stat values */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Page enter animation */
+main > * {
+  animation: fadeUp 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* 3D tilt — applied via .tilt-card on a wrapper that handles mouse events */
+.tilt-card {
+  transform-style: preserve-3d;
+  perspective: 1000px;
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.tilt-card:hover {
+  transform: perspective(1000px) rotateX(2deg) rotateY(-3deg) translateZ(8px);
+}
+
+/* Soft glow on hover for hero cards */
+.glow-hover {
+  position: relative;
+  overflow: hidden;
+}
+.glow-hover::after {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: radial-gradient(circle, rgba(245, 158, 11, 0.18) 0%, transparent 50%);
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  pointer-events: none;
+}
+.glow-hover:hover::after {
+  opacity: 1;
+}
+
+/* Conic gradient ring */
+.ring-gradient {
+  background: conic-gradient(from 0deg, #f59e0b 0%, #1e3260 25%, #3f63a8 50%, #f59e0b 100%);
+  animation: gradient-shift 8s linear infinite;
+}
+
+/* Shimmer effect */
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.4) 50%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 3s linear infinite;
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  main > *,
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  .tilt-card:hover {
+    transform: none;
+  }
 }

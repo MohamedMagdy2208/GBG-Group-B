@@ -4,7 +4,14 @@ from app.core.config import get_settings
 from app.core.rate_limit import rate_limit
 from app.core.rbac import require_staff
 from app.models import User
-from app.schemas import AITextRequest, EmbeddingResponse, ImageAnalysisRequest, ImageAnalysisResponse
+from app.schemas import (
+    AITextRequest,
+    DescribeFromImageRequest,
+    DescribeFromImageResponse,
+    EmbeddingResponse,
+    ImageAnalysisRequest,
+    ImageAnalysisResponse,
+)
 from app.services.azure_openai_service import azure_openai_service
 from app.services.azure_vision_service import azure_vision_service
 
@@ -26,6 +33,22 @@ async def extract_item_attributes(payload: AITextRequest, _: User = Depends(requ
 async def generate_embedding(payload: AITextRequest, _: User = Depends(require_staff)) -> dict:
     vector_id, embedding = await azure_openai_service.generate_embedding(payload.text)
     return {"vector_id": vector_id, "embedding": embedding}
+
+
+@router.post("/describe-from-image", response_model=DescribeFromImageResponse)
+async def describe_from_image(
+    payload: DescribeFromImageRequest,
+    _: User = Depends(require_staff),
+) -> dict:
+    vision = await azure_vision_service.analyze_uploaded_item_image(payload.image_url)
+    description = await azure_openai_service.describe_item_from_vision(vision)
+    return {
+        **description,
+        "vision_caption": vision.get("caption"),
+        "vision_tags": vision.get("tags", []),
+        "vision_ocr_text": vision.get("ocr_text"),
+        "source": "ai",
+    }
 
 
 @router.post("/summarize-match")

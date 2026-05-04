@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -22,7 +23,8 @@ class AzureVisionService:
                 endpoint=self.settings.azure_ai_vision_endpoint,
                 credential=AzureKeyCredential(self.settings.azure_ai_vision_key),
             )
-            result = client.analyze_from_url(
+            result = await asyncio.to_thread(
+                client.analyze_from_url,
                 image_url=image_url,
                 visual_features=[
                     VisualFeatures.CAPTION,
@@ -48,17 +50,25 @@ class AzureVisionService:
                 "objects": objects,
             }
         filename = Path(image_url).name.lower()
+        keywords = [
+            "phone", "iphone", "smartphone", "bag", "backpack", "suitcase",
+            "passport", "wallet", "laptop", "macbook", "keys", "keychain",
+            "watch", "headphones", "airpods", "camera", "tablet", "ipad",
+            "umbrella", "jacket", "book",
+        ]
         guessed_tags = []
-        for word in ["phone", "bag", "passport", "wallet", "laptop", "keys", "watch"]:
-            if word in filename:
+        seen: set[str] = set()
+        for word in keywords:
+            if word in filename and word not in seen:
                 guessed_tags.append({"name": word, "confidence": 0.82})
+                seen.add(word)
         if not guessed_tags:
-            guessed_tags = [{"name": "personal item", "confidence": 0.65}]
+            guessed_tags = [{"name": "personal item", "confidence": 0.55}]
         return {
             "caption": "Uploaded item image, analyzed by local mock vision.",
             "tags": guessed_tags,
             "ocr_text": "",
-            "objects": guessed_tags,
+            "objects": list(guessed_tags),
         }
 
 

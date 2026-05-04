@@ -1,8 +1,9 @@
 import { FormEvent, useEffect, useState } from "react";
 import axios from "axios";
+import { Search } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
-import { PageHeader } from "../components/PageHeader";
+import { Button, Card, Field, Input, Section } from "../components/ui";
 import type { ChatSession } from "../types";
 
 export function ReportStatusPage() {
@@ -41,20 +42,40 @@ export function ReportStatusPage() {
   }
 
   return (
-    <section className="max-w-xl">
-      <PageHeader title="Report Status" kicker="Passenger verification" />
-      <div className="mb-4 rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-600 shadow-sm">
-        Status lookup requires the report code and matching email or phone. Found-item storage details stay hidden until staff complete verification.
+    <Section
+      kicker="Passenger verification"
+      title="Check report status"
+      description="Enter the report code we sent you, plus the email or phone you used. Found-item details stay hidden until staff verify your identity in person."
+    >
+      <div className="mx-auto max-w-xl space-y-4">
+        <Card as="form" {...({ onSubmit: verify } as any)} className="space-y-4">
+          <Field label="Report code" hint="Format: LR-XXXXXXXX">
+            <Input
+              name="report_code"
+              defaultValue={params.get("code") ?? ""}
+              placeholder="LR-XXXXXXXX"
+              required
+              autoComplete="off"
+              className="font-mono"
+            />
+          </Field>
+          <Field label="Email or phone you used">
+            <Input name="contact" placeholder="you@example.com or +20…" required />
+          </Field>
+          {error ? (
+            <p className="rounded-2xl border border-danger-500/20 bg-danger-50 px-3 py-2 text-sm font-medium text-danger-700">{error}</p>
+          ) : null}
+          <Button type="submit" loading={busy} disabled={!session} fullWidth size="lg" leftIcon={<Search className="h-4 w-4" />}>
+            Check status
+          </Button>
+        </Card>
+        {message ? (
+          <Card className="bg-gradient-to-br from-navy-50 via-white to-gold-50/40">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-gold-700">Update</p>
+            <p className="mt-1 text-sm leading-relaxed text-ink-800">{message}</p>
+          </Card>
+        ) : null}
       </div>
-      <form onSubmit={verify} className="space-y-3 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-        <input className="focus-ring w-full rounded-lg border border-slate-200 px-3 py-2" name="report_code" defaultValue={params.get("code") ?? ""} placeholder="Report code" required />
-        <input className="focus-ring w-full rounded-lg border border-slate-200 px-3 py-2" name="contact" placeholder="Email or phone" required />
-        {error ? <p className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-medium text-rose-700">{error}</p> : null}
-        <button disabled={!session || busy} className="focus-ring rounded-lg bg-slate-900 px-4 py-2 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">
-          {busy ? "Checking..." : "Check status"}
-        </button>
-      </form>
-      {message && <div className="mt-4 rounded-lg border border-sky-200 bg-sky-50 p-4 text-sm font-medium text-sky-900">{message}</div>}
-    </section>
+    </Section>
   );
 }

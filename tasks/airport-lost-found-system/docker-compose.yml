@@ -35,8 +35,9 @@ services:
       DATABASE_URL: postgresql+psycopg://airport:airport@postgres:5432/airport_lost_found
       REDIS_URL: redis://redis:6379/0
       USE_AZURE_SERVICES: ${USE_AZURE_SERVICES:-false}
+      AUTO_CREATE_TABLES: "true"
       CORS_ORIGINS: '["http://localhost:5173"]'
-    command: sh -c "alembic upgrade head && python -m app.scripts.seed && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    command: sh -c "python -c 'from app.models import Base; from app.core.database import engine; Base.metadata.create_all(bind=engine, checkfirst=True)' && python -m app.scripts.seed && uvicorn app.main:app --host 0.0.0.0 --port 8000"
     ports:
       - "8000:8000"
     volumes:
@@ -57,7 +58,8 @@ services:
       DATABASE_URL: postgresql+psycopg://airport:airport@postgres:5432/airport_lost_found
       REDIS_URL: redis://redis:6379/0
       USE_AZURE_SERVICES: ${USE_AZURE_SERVICES:-false}
-    command: sh -c "alembic upgrade head && python -m app.scripts.worker"
+      AUTO_CREATE_TABLES: "true"
+    command: sh -c "python -m app.scripts.worker"
     volumes:
       - ./backend/local_uploads:/app/local_uploads
     depends_on:

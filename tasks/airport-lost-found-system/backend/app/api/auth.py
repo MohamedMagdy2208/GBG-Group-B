@@ -172,6 +172,42 @@ def me(current_user: User = Depends(get_current_user)) -> User:
     return current_user
 
 
+@router.get("/me/preferences")
+def get_preferences(current_user: User = Depends(get_current_user)) -> dict:
+    return {
+        "preferred_channel": current_user.preferred_channel or "email",
+        "preferred_language": current_user.preferred_language or "en",
+        "notification_consent_at": current_user.notification_consent_at,
+    }
+
+
+@router.put("/me/preferences")
+def set_preferences(
+    payload: dict,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    channel = (payload.get("preferred_channel") or current_user.preferred_channel or "email").lower()
+    if channel not in {"email", "sms", "none"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported channel")
+    language = (payload.get("preferred_language") or current_user.preferred_language or "en").lower()
+    if language not in {"en", "ar"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported language")
+    current_user.preferred_channel = channel
+    current_user.preferred_language = language
+    if payload.get("consent") and current_user.notification_consent_at is None:
+        current_user.notification_consent_at = datetime.now(UTC)
+    elif payload.get("consent") is False:
+        current_user.notification_consent_at = None
+    db.commit()
+    db.refresh(current_user)
+    return {
+        "preferred_channel": current_user.preferred_channel,
+        "preferred_language": current_user.preferred_language,
+        "notification_consent_at": current_user.notification_consent_at,
+    }
+
+
 def _issue_tokens(db: Session, user: User, request: Request) -> TokenResponse:
     settings = get_settings()
     access_token = create_access_token(str(user.id), {"role": user.role.value})

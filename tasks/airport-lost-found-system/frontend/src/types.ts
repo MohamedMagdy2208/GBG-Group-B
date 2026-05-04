@@ -55,6 +55,21 @@ export type FoundItem = {
   updated_at: string;
 };
 
+export type EvidenceSpan = { text: string; start: number; end: number };
+
+export type EvidenceFacet = "category" | "color" | "location" | "flight" | "identifier" | "text";
+
+export type EvidenceSpans = {
+  lost?: Partial<Record<EvidenceFacet, EvidenceSpan[]>>;
+  found?: Partial<Record<EvidenceFacet, EvidenceSpan[]>>;
+  shared_terms?: string[];
+  category_match?: boolean;
+  color_match?: boolean;
+  location_match?: boolean;
+  flight_match?: boolean;
+  identifier_overlap?: string[];
+};
+
 export type MatchCandidate = {
   id: number;
   lost_report_id: number;
@@ -70,6 +85,7 @@ export type MatchCandidate = {
   unique_identifier_score: number;
   confidence_level: "high" | "medium" | "low";
   ai_match_summary?: string | null;
+  evidence_spans_json?: EvidenceSpans;
   status: "pending" | "approved" | "rejected" | "needs_more_info";
   review_notes?: string | null;
   lost_report?: LostReport | null;

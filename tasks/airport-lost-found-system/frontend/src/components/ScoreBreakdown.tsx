@@ -12,6 +12,7 @@ const metrics: Array<[keyof MatchCandidate, string]> = [
 ];
 
 export function ScoreBreakdown({ match }: { match: MatchCandidate }) {
+  const imageScore = Number((match.evidence_spans_json as { image_score?: number } | undefined)?.image_score ?? 0);
   return (
     <div className="space-y-2">
       {metrics.map(([key, label]) => {
@@ -26,6 +27,13 @@ export function ScoreBreakdown({ match }: { match: MatchCandidate }) {
           </div>
         );
       })}
+      <div className="grid grid-cols-[88px_1fr_42px] items-center gap-2 text-xs">
+        <span className="font-medium text-violet-700">Image</span>
+        <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+          <div className="h-full rounded-full bg-violet-500" style={{ width: `${Math.max(0, Math.min(100, imageScore))}%` }} />
+        </div>
+        <span className="text-right font-semibold text-violet-700">{imageScore.toFixed(0)}</span>
+      </div>
     </div>
   );
 }

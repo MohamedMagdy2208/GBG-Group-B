@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.api.utils import enrich_lost_report, invalidate_operational_caches, run_matching_for_lost_report
@@ -9,11 +10,29 @@ from app.core.rate_limit import rate_limit
 from app.core.rbac import get_current_user, get_optional_user
 from app.models import LostReport, User, UserRole
 from app.schemas import LostReportCreate, LostReportRead, LostReportUpdate, MatchCandidateRead
+from app.services.azure_openai_service import azure_openai_service
 from app.services.azure_search_service import azure_search_service
+from app.services.azure_vision_service import azure_vision_service
 from app.services.outbox_service import enqueue_job, enqueue_outbox
 
 
+class PhotoOnlyLostReportRequest(BaseModel):
+    image_url: str
+    contact_email: str | None = None
+    contact_phone: str | None = None
+    lost_location: str | None = None
+
+
 router = APIRouter(prefix="/lost-reports", tags=["lost reports"])
+
+
+def _client_ip(request: Request) -> str | None:
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",", 1)[0].strip()
+    if request.client:
+        return request.client.host
+    return None
 
 
 def _can_access_report(user: User, report: LostReport) -> bool:
@@ -37,7 +56,11 @@ async def create_lost_report(
         if report:
             return report
 
-    report = LostReport(**payload.model_dump(), passenger_id=current_user.id if current_user else None)
+    report = LostReport(
+        **payload.model_dump(),
+        passenger_id=current_user.id if current_user else None,
+        created_from_ip=_client_ip(request),
+    )
     db.add(report)
     await enrich_lost_report(db, report)
     enqueue_outbox(db, "lost_report.created", "lost_report", report.id, {"report_code": report.report_code, "category": report.category})
@@ -118,6 +141,44 @@ async def delete_lost_report(
     db.delete(report)
     db.commit()
     await invalidate_operational_caches()
+
+
+@router.post(
+    "/photo-only",
+    response_model=LostReportRead,
+    dependencies=[Depends(rate_limit("lost_report_photo", get_settings().rate_limit_public_per_minute, 60))],
+)
+async def create_lost_report_from_photo(
+    payload: PhotoOnlyLostReportRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_user),
+) -> LostReport:
+    if not payload.contact_email and not payload.contact_phone:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="contact_email or contact_phone is required")
+    vision = await azure_vision_service.analyze_uploaded_item_image(payload.image_url)
+    description = await azure_openai_service.describe_item_from_vision(vision)
+    report = LostReport(
+        item_title=description["item_title"],
+        category=description.get("category"),
+        raw_description=description.get("raw_description") or "Photo-only report — staff to review image.",
+        color=description.get("color"),
+        brand=description.get("brand"),
+        lost_location=payload.lost_location,
+        contact_email=payload.contact_email,
+        contact_phone=payload.contact_phone,
+        proof_blob_url=payload.image_url,
+        passenger_id=current_user.id if current_user else None,
+        created_from_ip=_client_ip(request),
+    )
+    db.add(report)
+    await enrich_lost_report(db, report)
+    enqueue_outbox(db, "lost_report.created", "lost_report", report.id, {"report_code": report.report_code, "category": report.category, "source": "photo_only"})
+    enqueue_job(db, "matching.lost_report", {"lost_report_id": report.id})
+    db.commit()
+    db.refresh(report)
+    await invalidate_operational_caches()
+    return report
 
 
 @router.post("/{report_id}/run-matching", response_model=list[MatchCandidateRead])

@@ -9,6 +9,7 @@ import { CategoriesManagement } from "./pages/CategoriesManagement";
 import { ChatPage } from "./pages/ChatPage";
 import { ClaimVerificationPage } from "./pages/ClaimVerificationPage";
 import { CustodyTimelinePage } from "./pages/CustodyTimelinePage";
+import { DemoConsolePage } from "./pages/DemoConsolePage";
 import { FoundItemDetailPage } from "./pages/FoundItemDetailPage";
 import { FoundItemListPage } from "./pages/FoundItemListPage";
 import { LandingPage } from "./pages/LandingPage";
@@ -18,6 +19,7 @@ import { LostReportDetailPage } from "./pages/LostReportDetailPage";
 import { LostReportForm } from "./pages/LostReportForm";
 import { LostReportListPage } from "./pages/LostReportListPage";
 import { MatchReviewPage } from "./pages/MatchReviewPage";
+import { PhotoOnlyLostReportPage } from "./pages/PhotoOnlyLostReportPage";
 import { ReportStatusPage } from "./pages/ReportStatusPage";
 import { QRScanPage } from "./pages/QRScanPage";
 import { SettingsPage } from "./pages/SettingsPage";
@@ -32,6 +34,7 @@ export default function App() {
         <Route path="login" element={<LoginPage />} />
         <Route path="chat" element={<ChatPage />} />
         <Route path="lost-report" element={<LostReportForm />} />
+        <Route path="lost-report/photo" element={<PhotoOnlyLostReportPage />} />
         <Route path="status" element={<ReportStatusPage />} />
         <Route element={<ProtectedRoute roles={["staff", "admin", "security"]} />}>
           <Route path="staff" element={<StaffDashboard />} />
@@ -53,6 +56,7 @@ export default function App() {
           <Route path="admin/categories" element={<CategoriesManagement />} />
           <Route path="admin/settings" element={<SettingsPage />} />
           <Route path="admin/operations" element={<AdminOperationsPage />} />
+          <Route path="admin/demo" element={<DemoConsolePage />} />
         </Route>
       </Route>
     </Routes>

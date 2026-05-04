@@ -19,9 +19,9 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     bind = op.get_bind()
-    Base.metadata.create_all(bind=bind)
+    Base.metadata.create_all(bind=bind, checkfirst=True)
 
 
 def downgrade() -> None:
     bind = op.get_bind()
-    Base.metadata.drop_all(bind=bind)
+    Base.metadata.drop_all(bind=bind, checkfirst=True)
